@@ -1,3 +1,9 @@
+\[\*\*中文版\*\*](./README\_CN.md) | \[\*\*English\*\*](./README.md)
+
+
+
+\---
+
 ComfyUI-TrucyNodes Manual
 
 Advanced toolset for AI cinematography and professional visual storytelling, optimized for Flux2-Klein workflows.
