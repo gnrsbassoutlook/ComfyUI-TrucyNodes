@@ -1,168 +1,96 @@
-\# 🎬 ComfyUI-TrucyNodes
+# 🎬 ComfyUI-TrucyNodes
+**Advanced Cinematic Suite for AI Storyboarding & High-Fidelity Visual Consistency**
 
-\*\*An Advanced Cinematic Suite for AI Storyboarding \& Visual Consistency\*\*
+---
 
+## 📖 Overview
+ComfyUI-TrucyNodes is a professional-grade toolkit designed for high-end AI cinematography. It specializes in solving the "Asset Fusion" challenge where multiple characters, props, and environments must be merged into a single, cohesive shot. Specifically optimized for **Flux2-Klein** and advanced image-to-video pipelines.
 
+**[🇨🇳 中文说明](./README_CN.md)**
 
-\[!\[GitHub Stars](https://img.shields.io/github/stars/gnrsbassoutlook/ComfyUI-TrucyNodes?style=social)](https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes)
+---
 
-\[!\[ComfyUI](https://img.shields.io/badge/ComfyUI-Plugin-blue)](https://github.com/comfyanonymous/ComfyUI)
+## 🚀 Core Node: TrucyKleinEncode (The Fusion Director)
+This is the flagship node of the suite. It manages the complex logic of injecting up to **10 different image assets** into the latent space while maintaining strict spatial control.
 
+### 🛠️ Detailed Parameter Definitions:
 
+*   **`width` & `height`** 📏:
+    *   Defines the global canvas resolution. 
+    *   *Cinematography Tip*: For Flux-based models, always use **1088** for height. It ensures 16-pixel alignment, preventing sampling errors and artifacts.
 
-\*\*\[🇨🇳 中文说明](./README\_CN.md)\*\*
+*   **`main_prompt_ratio`** ⚖️:
+    *   **The Power Scale**: Controls the balance between your text instructions and visual assets.
+    *   **Logic**: Uses the non-linear formula `8*r*(r-1) - 6*r + 6`.
+    *   **0.5 (Default)**: Perfect 1:1 parity between text and images.
+    *   **> 0.5**: Favors the **Text Prompt**. Use this if the model ignores actions (e.g., "screaming," "running").
+    *   **< 0.5**: Favors the **Asset Texture**. Use this if the character's likeness is drifting from the reference.
 
+*   **`non_base_alignment`** 🔄: **[The Engine Selector]**
+    *   **`Follow Node (W/H)`**: 🚀 **High-Fidelity Mode**.
+        *   **Logic**: Every connected asset (`img1-10`) is internally projected onto a full-frame black canvas matching your global width/height.
+        *   **RSA Logic**: In this mode, **RSA (Reference Square Area) settings are COMPLETELY IGNORED**.
+        *   **Result**: 1:1 spatial coordinate mapping for all assets. Best for complex scenes where every prop must be exactly positioned.
+    *   **`Use RSA Scaling`**: ⚡ **Performance Mode**.
+        *   **Logic**: Only the asset selected in `base_target` remains at full resolution. 
+        *   **RSA Logic**: **The RSA Value is ACTIVATED** for all other secondary assets.
+        *   **Result**: Dramatically faster sampling speeds (up to 50% faster) and lower VRAM usage by compressing secondary asset tokens.
 
+*   **`rsa_value` (Reference Square Area)** 📐:
+    *   **Status**: Active **ONLY** during `Use RSA Scaling` mode.
+    *   **Function**: Defines the pixel area limit for secondary assets. 
+    *   **Values**: **1024** is the sweet spot. Lower values (768/512) increase speed further; higher values (1280+) preserve more fine texture on secondary characters.
 
-ComfyUI-TrucyNodes is a professional-grade node set designed for AI Cinematography and Storyboarding. It is specifically built to solve the "Hallucination" and "Misalignment" issues in multi-asset fusion, particularly when using the \*\*Flux2-Klein\*\* model.
+*   **`base_target`** 🎯:
+    *   Designates the "Anchor Asset." Typically, you should select your background (e.g., `img5`).
+    *   This selected image becomes the physical foundation for the Latent output.
+    *   **Important**: The `base_mask` input is strictly bound to the asset chosen here.
 
+*   **`img1` - `img10` & `strengths`** 🖼️:
+    *   **Hard-Coded Mapping**: If you plug a character into the `img4` port, you **must** use the tag `img4` in your prompt.
+    *   **Optimization**: Setting a strength to **0.0** completely severs the connection, ensuring zero computational cost for that slot.
 
+---
 
-\---
+## 🖼️ TrucyImageAdapter (Resolution Bridge)
+Bridges the gap between AI generation standards (**1088p**) and professional video industry standards (**1080p**).
 
+*   **`mode` Options**:
+    *   **`Crop (Center)`** ✂️: **[Recommended]** Calculates the exact 8-pixel difference and removes 4px from the top and 4px from the bottom. This ensures 1:1 pixel accuracy with **zero distortion or stretching**.
+    *   **`Stretch`** 🎨: Forcibly resizes the image to the target dimensions regardless of original proportions.
 
+---
 
-\## 🔥 Core Node: TrucyKleinEncode (The Director's Palette)
+## 📊 TrucyExcelReader (Script-to-Asset Pipeline)
+Automates the storyboard process by ingesting script data directly from Excel.
 
-This is the heart of the suite. It allows you to inject up to \*\*10 image assets\*\* (characters, props, backgrounds) into one scene with pixel-perfect spatial control.
+*   **Quoted Path Support**: Automatically strips double quotes (`""`) from paths, allowing you to "Copy as Path" directly from Windows Explorer into the node.
+*   **Smart Extraction**: Uses Regex to find the **first valid number** in any string. 
+    *   *Example*: Input "Scene_05.5_Final" -> Outputs Float: **5.5** | Int: **5**.
 
+---
 
+## 🔊 Audio Synchronization Tools
+*   **`Audio Detector & Padder`** ⏱️: Calculates the exact frame requirements based on FPS. It features "Stepped Padding" (e.g., 250ms/500ms), ensuring the AI video length aligns perfectly with musical or rhythmic beats to prevent sync-drift.
+*   **`Empty Audio Generator`** 🔇: Generates high-fidelity silent tracks (44.1kHz). Used for cinematic timing or as placeholders in complex video sequences.
 
-\### 🛠️ Detailed Parameter Logic:
+---
 
+## 🛠️ Installation & Maintenance
 
+1.  Navigate to `ComfyUI/custom_nodes/`.
+2.  Clone the repository:
+    ```bash
+    git clone https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes.git
+    ```
+3.  **To Push your local changes to GitHub**:
+    ```bash
+    git add .
+    git commit -m "docs: Comprehensive industrial-grade manual update"
+    git push origin main
+    ```
 
-\- \*\*`width` \& `height`\*\* 📏: Sets the target canvas resolution.
+---
 
-&#x20;   - \*Note\*: For Flux2 models, it is highly recommended to use \*\*1088\*\* instead of 1080 to ensure the height is divisible by 16 for maximum model stability.
-
-
-
-\- \*\*`main\_prompt\_ratio`\*\* ⚖️: Controls the power balance between your Text Prompt and Image Assets.
-
-&#x20;   - Uses a non-linear influence formula: `8\*r\*(r-1) - 6\*r + 6`.
-
-&#x20;   - \*\*0.5 (Default)\*\*: Perfect 1:1 balance. Mirroring the best settings from high-end specialized nodes.
-
-&#x20;   - \*\*> 0.5\*\*: Favors the Text. Use this if the model is ignoring your action commands (e.g., "fighting," "jumping").
-
-&#x20;   - \*\*< 0.5\*\*: Favors the Images. Use this if the character's face doesn't look enough like your asset.
-
-
-
-\- \*\*`non\_base\_alignment`\*\* 🔄: \*\*\[The Performance Logic Switch]\*\*
-
-&#x20;   - \*\*`Follow Node (W/H)`\*\*: 🚀 \*\*Ultra-Precision Mode\*\*. 
-
-&#x20;       - Every image from `img1` to `img10` is internally placed on a full-frame black canvas matching the node's W/H. 
-
-&#x20;       - This creates a \*\*1:1 physical coordinate system\*\* for every asset.
-
-&#x20;       - \*\*RSA SETTINGS ARE COMPLETELY IGNORED\*\* in this mode. It provides the highest quality but consumes significantly more VRAM and sampling time.
-
-&#x20;   - \*\*`Use RSA Scaling`\*\*: ⚡ \*\*Optimized Mode\*\*.
-
-&#x20;       - Only the image selected in `base\_target` remains full resolution.
-
-&#x20;       - All other "secondary" assets (like props or extra characters) are resized based on the \*\*RSA Value\*\*. This drastically reduces KSampler computation time (often by 50%+) while maintaining character likeness.
-
-
-
-\- \*\*`rsa\_value`\*\* (Reference Square Area) 📐:
-
-&#x20;   - \*\*Active ONLY when `non\_base\_alignment` is set to `Use RSA Scaling`\*\*.
-
-&#x20;   - It defines the pixel area for secondary assets. 
-
-&#x20;   - \*\*1024 (Default)\*\*: Balanced quality. 
-
-&#x20;   - \*\*768 / 512\*\*: Lowers asset texture detail but makes the KSampler "fly."
-
-&#x20;   - \*\*1280+\*\*: Near-perfect texture for secondary assets but increases sampling time.
-
-
-
-\- \*\*`base\_target`\*\* 🎯:
-
-&#x20;   - Defines which slot is the \*\*Physical Anchor\*\*.
-
-&#x20;   - The selected image (usually `img5` for background) will be outputted through the pink `latent` port to the KSampler as the "base paint." 
-
-&#x20;   - \*\*Crucial\*\*: The `base\_mask` only applies to the image selected here.
-
-
-
-\- \*\*`img1` - `img10` \& `strengths`\*\* 🖼️:
-
-&#x20;   - Strictly mapped input slots. If you connect a character to `img4`, use the tag `img4` in your prompt.
-
-&#x20;   - Setting strength to \*\*0.0\*\* completely disables the slot, saving both VRAM and calculation cycles.
-
-
-
-\---
-
-
-
-\## 🖼️ TrucyImageAdapter (Resolution Bridge)
-
-Bridges the gap between technical AI resolutions (\*\*1088p\*\*) and professional video standards (\*\*1080p\*\*).
-
-
-
-\- \*\*`mode`\*\*:
-
-&#x20;   - \*\*`Crop (Center)`\*\*: ✂️ The Gold Standard for 1088 -> 1080. It mathematically calculates the difference and shaves 4 pixels from the top and bottom. No stretching, no distortion—just pure 1:1 pixel mapping.
-
-&#x20;   - \*\*`Stretch`\*\*: 🎨 Ignores aspect ratio and forces the image to fit the target W/H.
-
-
-
-\---
-
-
-
-\## 📊 TrucyExcelReader (Smart Production Loader)
-
-Automates your storyboard workflow by reading script data from Excel files.
-
-
-
-\- \*\*Windows Path Support\*\*: Automatically sanitizes paths copied from Windows Explorer (removing double quotes `""`).
-
-\- \*\*Smart Number Extractor\*\*: Using Regex to find the \*\*first\*\* number (Int or Float) in a text block.
-
-&#x20;   - \*Example\*: "Shot 01.25 sequence" -> Outputs \*\*1.25\*\* (float) and \*\*1\*\* (int).
-
-
-
-\---
-
-
-
-\## 🔊 Audio Suite (Sync \& Timing)
-
-\- \*\*`Audio Detector \& Padder`\*\* ⏱️: Calculates exact frame counts based on FPS and audio length. Supports padding steps (e.g., 250ms) to ensure video rendering ends perfectly on a beat, avoiding audio desync.
-
-\- \*\*`Empty Audio Generator`\*\* 🔇: Creates high-fidelity silence tracks (44.1kHz default) by seconds or frame counts. Essential for timing shots in a cinematic sequence.
-
-
-
-\---
-
-
-
-\## 📦 Installation \& Push
-
-1\. Clone to `ComfyUI/custom\_nodes/ComfyUI-TrucyNodes`.
-
-2\. Push updates to your repo:
-
-```bash
-
-git add .
-
-git commit -m "feat: Detailed README and logic unification"
-
-git push origin main
-
+## 📄 License
+MIT License
