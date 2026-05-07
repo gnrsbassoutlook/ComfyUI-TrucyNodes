@@ -21,7 +21,6 @@ class TrucyTxtBatchLoader:
 
     @classmethod
     def IS_CHANGED(cls, directory_path, **kwargs):
-        # 监测文件夹修改时间，确保外部修改文件后 ComfyUI 能立即感知并刷新
         clean_path = directory_path.strip().replace('"', '')
         if os.path.isdir(clean_path):
             return os.path.getmtime(clean_path)
@@ -54,7 +53,6 @@ class TrucyTxtBatchLoader:
             file_path = os.path.join(clean_path, filename)
             pure_name = os.path.splitext(filename)[0]
             
-            # 多编码尝试，解决中文乱码痛点
             content = ""
             for encoding in ['utf-8', 'gbk', 'utf-16']:
                 try:
@@ -74,7 +72,6 @@ class TrucyTxtBatchLoader:
         merged_3 = "\n\n".join(all_contents)
         merged_4 = "\n\n".join(all_with_headers)
 
-        # 性能保护：防止超大文本撑爆浏览器前端渲染
         max_chars = 1000000 
         if len(merged_3) > max_chars: merged_3 = merged_3[:max_chars] + "..."
         if len(merged_4) > max_chars: merged_4 = merged_4[:max_chars] + "..."
@@ -104,13 +101,24 @@ class TrucyTxtPreviewAndSave:
     def process_text(self, text, save_to_file, directory_path, file_name, encoding):
         if save_to_file and text:
             clean_dir = directory_path.strip().replace('"', '')
-            os.makedirs(clean_dir, exist_ok=True)
+            
+            # --- 核心容错逻辑：路径有效性检查 ---
+            try:
+                # 尝试创建目录，如果盘符不存在会抛出 OSError
+                os.makedirs(clean_dir, exist_ok=True)
+            except (OSError, IOError):
+                # 备选方案：Windows 默认“文档”文件夹
+                user_documents = os.path.join(os.path.expanduser("~"), "Documents")
+                clean_dir = os.path.join(user_documents, "TrucyNodes_Output")
+                os.makedirs(clean_dir, exist_ok=True)
+                print(f"[TrucyNodes] WARNING: Target path invalid. Falling back to: {clean_dir}")
 
+            # 处理文件名
             base_name = file_name.strip()
             if base_name.lower().endswith(".txt"):
                 base_name = base_name[:-4]
             
-            # 核心：自动编号逻辑，防止覆盖旧文件
+            # 自动编号逻辑
             final_filename = f"{base_name}.txt"
             full_path = os.path.join(clean_dir, final_filename)
             counter = 1
@@ -123,9 +131,9 @@ class TrucyTxtPreviewAndSave:
             try:
                 with open(full_path, "w", encoding=file_enc) as f:
                     f.write(text)
-                print(f"[TrucyNodes] Saved: {full_path}")
+                print(f"[TrucyNodes] Saved Successfully: {full_path}")
             except Exception as e:
-                print(f"[TrucyNodes] Save Error: {str(e)}")
+                print(f"[TrucyNodes] Critical Save Error: {str(e)}")
         
         return {"ui": {"text": [text]}, "result": (text,)}
 
