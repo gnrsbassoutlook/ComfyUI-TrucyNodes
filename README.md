@@ -76,6 +76,36 @@ Automates the storyboard process by ingesting script data directly from Excel.
 
 ---
 
+### 5. Text Asset Management (TXT Nodes) 📄
+A powerful suite for handling storyboards, scripts, and prompt sequences.
+
+*   **TrucyTxtBatchLoader**:
+    *   **Logic**: Scans a directory for `.txt` files.
+    *   **Sorting**: Supports `Alphabetical (A-Z)` and `Creation Time (Oldest First)`.
+    *   **Indexing**: Use the `index` to select a specific file (ideal for batch loops).
+    *   **Outputs**: 
+        1. `selected_content`: Text from the chosen file.
+        2. `selected_filename`: The name of the file (without extension).
+        3. `merged_content`: All files in the folder merged into one string (separated by empty lines).
+        4. `merged_with_headers`: All files merged with their filenames as headers.
+    *   **Auto-Update**: Built-in `IS_CHANGED` logic ensures the data refreshes instantly when you modify files externally.
+
+*   **TrucyTxtPreviewAndSave**:
+    *   **Preview**: Displays the input text directly on the node UI.
+    *   **Smart Saving**: 
+        - Separate inputs for `directory_path` and `file_name`.
+        - **Auto-Increment**: If a file exists, it adds `_1`, `_2` to prevent overwriting.
+        - **Robust Fallback**: If the target path is invalid (e.g., wrong drive letter), it automatically saves to `Documents/TrucyNodes_Output`.
+    *   **Encoding**: Switchable between `UTF-8` and `ANSI (GBK)` for downstream software compatibility.
+
+### 6. Audio Loader by Index 🎵
+Designed for high-performance audio handling in cinematic workflows.
+
+*   **Efficiency**: Unlike standard loaders, it only reads the **specific file** requested by the `index`, drastically reducing memory usage.
+*   **Multi-Format**: Supports `.mp3`, `.wav`, `.flac`, `.ogg`, `.m4a`, etc.
+*   **Auto-Resampling**: Built-in high-quality resampler (44.1k, 48k, etc.) to ensure all audio clips match your video project requirements.
+*   **Safety Fallback**: If the `index` is out of bounds or the folder is empty, the node generates a **1-second 1kHz Sine Wave (Beep)** instead of crashing your workflow.
+
 ## 🛠️ Installation & Maintenance
 
 1.  Navigate to `ComfyUI/custom_nodes/`.
