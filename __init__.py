@@ -14,22 +14,28 @@ from .trucy_toolkit import (
     TrucyIDExtractor, TrucyStringSlicer, TrucyAssetGrid5, TrucyAssetGrid10, TrucyDatasetSaver
 )
 
-# 3.Renamed 视频与循环
+# 3. 视频与逻辑 (循环节点区分 9ch 和 2ch)
 from .trucy_video import TrucyVideoCombine
-from .trucy_loop import TrucyForLoopStart, TrucyForLoopEnd
+from .trucy_loop import (
+    TrucyForLoopStart9ch, TrucyForLoopEnd9ch,
+    TrucyForLoopStart2ch, TrucyForLoopEnd2ch
+)
 
 NODE_CLASS_MAPPINGS = {
-    # 音频
+    # 音频工具
     "TrucyAudioLoaderIndex": TrucyAudioLoaderIndex,
     "AudioLengthDetector": AudioLengthDetector,
     "EmptyAudioGenerator": EmptyAudioGenerator,
-    # 文本
+    
+    # 文本工具
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
-    # 核心资产
+    
+    # 核心资产与适配
     "TrucyExcelReader": TrucyExcelReader,
     "TrucyKleinEncode": TrucyKleinEncode,
     "TrucyImageAdapter": TrucyImageAdapter,
+    
     # 工业工具箱
     "TrucyImageLoaderString5": TrucyImageLoaderString5,
     "TrucyImageLoaderString10": TrucyImageLoaderString10,
@@ -41,10 +47,17 @@ NODE_CLASS_MAPPINGS = {
     "TrucyAssetGrid5": TrucyAssetGrid5,
     "TrucyAssetGrid10": TrucyAssetGrid10,
     "TrucyDatasetSaver": TrucyDatasetSaver,
-    # 视频与逻辑
+    
+    # 视频合成
     "TrucyVideoCombine": TrucyVideoCombine,
-    "TrucyForLoopStart": TrucyForLoopStart,
-    "TrucyForLoopEnd": TrucyForLoopEnd
+    
+    # 逻辑循环 (9通道版)
+    "TrucyForLoopStart9ch": TrucyForLoopStart9ch,
+    "TrucyForLoopEnd9ch": TrucyForLoopEnd9ch,
+    
+    # 逻辑循环 (2通道版)
+    "TrucyForLoopStart2ch": TrucyForLoopStart2ch,
+    "TrucyForLoopEnd2ch": TrucyForLoopEnd2ch
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -69,8 +82,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
-    "TrucyForLoopStart": "🚀 Trucy For Loop Start",
-    "TrucyForLoopEnd": "🚀 Trucy For Loop End"
+    
+    # 循环节点显示名
+    "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
+    "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
+    "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",
+    "TrucyForLoopEnd2ch": "🚀 Trucy For Loop End (2ch)"
 }
 
 WEB_DIRECTORY = "./web"
