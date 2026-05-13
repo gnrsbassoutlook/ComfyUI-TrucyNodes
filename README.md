@@ -10,14 +10,14 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
-### [2024-05-06] Production-Grade Refactor: UX Consistency & Error Handling
-🚀 UI/UX Unification: Aligned the menu order and parameter naming between Audio Loader and TXT Loader. Both now feature a standardized interface.
-🔢 Smart Indexing: Added index_mode (0-based / 1-based) to both Text and Audio loaders for seamless integration with Excel and Logic loops.
-🛡️ Strict Range Protection:
-Text Loader now outputs "N/A" instead of looping back to the start when the index is out of bounds.
-Audio Loader now generates a 1-second 1kHz Beep tone when the index is invalid, providing immediate audible feedback.
-🔄 Real-time Excel Sync: Modified the Excel Reader to monitor file modification time. Nodes now refresh instantly upon saving the Excel file (Ctrl+S) without changing parameters.
-⚡ Performance Toolkit: Fully consolidated all utility nodes into trucy_toolkit.py for faster startup and cleaner organization.
+### [2024-05-06] Major Upgrade: Intelligence & Connectivity Expansion
+🚀 Ultra-Splitter 2.0: Refactored Trucy Text Splitter (5 & 10) into high-capacity nodes.
+Tri-Type Output: Each segment now simultaneously outputs String, Integer, and Float.
+Smart Extraction: Built-in regex engine automatically extracts the first number from text (e.g., "04.Character" -> Int: 4).
+Massive Delimiters: Expanded the separator list to include almost all special characters (~!@#$%^&*()-+_{}[]|<>:;./\).
+🎯 Trucy ID Extractor: Upgraded to support 2-character IDs (like X1) by making the 3rd slot optional. Improved "Auto" mode to catch short alphanumeric strings.
+📁 Consolidate & Clean: Finalized trucy_toolkit.py to house all utility nodes, resulting in a cleaner file structure and faster ComfyUI boot times.
+🛡️ Bug Fixes: Corrected node mapping for TrucyAssetGrid5 to ensure stable UI rendering.
 
 ## 🚀 Core Modules
 
