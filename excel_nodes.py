@@ -22,8 +22,12 @@ class TrucyExcelReader:
 
     @classmethod
     def IS_CHANGED(cls, excel_path, sheet_name, row, column):
-        # 保持缓存刷新逻辑
-        return f"{excel_path}_{sheet_name}_{row}_{column}"
+        # 【核心修改】：不再返回固定字符串，而是返回文件的最后修改时间！
+        # 这样只要你在外部用 Excel 保存了文件，ComfyUI 下次运行就会自动重新读取。
+        clean_path = excel_path.strip().replace('"', '')
+        if os.path.exists(clean_path):
+            return os.path.getmtime(clean_path)
+        return float("NaN")
 
     def read_cell(self, excel_path, sheet_name, row, column):
         # 1. 路径清洗
@@ -49,29 +53,19 @@ class TrucyExcelReader:
             full_str = str(cell_value)
 
             # --- 4. 智能数字提取逻辑 ---
-            # 正则表达式解释：
-            # [-+]?          : 可能有正负号
-            # \d*\.\d+       : 匹配小数（如 01.25, .25）
-            # |              : 或者
-            # \d+            : 匹配整数
-            # re.search 会只找第一个匹配项
             number_match = re.search(r"[-+]?\d*\.\d+|[-+]?\d+", full_str)
 
             res_float = 0.0
             res_int = 0
 
             if number_match:
-                num_str = number_match.group() # 提取到的第一个数字字符串
+                num_str = number_match.group() 
                 try:
                     res_float = float(num_str)
-                    res_int = int(res_float) # 向下取整转为整数
+                    res_int = int(res_float) 
                 except:
                     pass
 
-            # 5. 返回结果
-            # string: 返回原始完整文本
-            # int: 返回提取到的第一个数字的整数部分
-            # float: 返回提取到的第一个数字的小数
             return (full_str, res_int, res_float)
 
         except Exception as e:

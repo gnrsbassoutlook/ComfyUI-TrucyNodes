@@ -10,6 +10,15 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
+### [2024-05-06] Production-Grade Refactor: UX Consistency & Error Handling
+🚀 UI/UX Unification: Aligned the menu order and parameter naming between Audio Loader and TXT Loader. Both now feature a standardized interface.
+🔢 Smart Indexing: Added index_mode (0-based / 1-based) to both Text and Audio loaders for seamless integration with Excel and Logic loops.
+🛡️ Strict Range Protection:
+Text Loader now outputs "N/A" instead of looping back to the start when the index is out of bounds.
+Audio Loader now generates a 1-second 1kHz Beep tone when the index is invalid, providing immediate audible feedback.
+🔄 Real-time Excel Sync: Modified the Excel Reader to monitor file modification time. Nodes now refresh instantly upon saving the Excel file (Ctrl+S) without changing parameters.
+⚡ Performance Toolkit: Fully consolidated all utility nodes into trucy_toolkit.py for faster startup and cleaner organization.
+
 ## 🚀 Core Modules
 
 ### 1. High-Fidelity Visual Fusion (Klein Nodes)
