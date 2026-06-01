@@ -2,7 +2,8 @@
 
 # 1. 基础模块导入
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator
-from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer
+# 核心修改：这里加入了新节点 TrucyTextSlicerSmart
+from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextSlicerSmart
 from .excel_nodes import TrucyExcelReader
 from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
 from .image_adapter import TrucyImageAdapter
@@ -39,11 +40,12 @@ NODE_CLASS_MAPPINGS = {
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
     "TrucySymbolSniffer": TrucySymbolSniffer,
+    "TrucyTextSlicerSmart": TrucyTextSlicerSmart, # 新增
     
     # 核心溶图与分辨率适配
     "TrucyExcelReader": TrucyExcelReader,
-    "TrucyKleinEncode": TrucyKleinEncode,       # 10路原版
-    "TrucyKleinEncode5": TrucyKleinEncode5,     # 5路新增
+    "TrucyKleinEncode": TrucyKleinEncode,
+    "TrucyKleinEncode5": TrucyKleinEncode5,
     "TrucyImageAdapter": TrucyImageAdapter,
     
     # Trucy Toolkit 工业工具箱
@@ -78,12 +80,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)", # 新增
     "TrucyExcelReader": "🚀 Excel Cell Reader (Trucy)",
-    
-    # 5路和 10路 显示名称
     "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
     "TrucyKleinEncode5": "🚀 Klein-Model Text Encode (5ch) (Trucy)",
-    
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
     "TrucyImageLoaderString5": "🚀 Trucy Image Loader (String 5)",
     "TrucyImageLoaderString10": "🚀 Trucy Image Loader (String 10)",

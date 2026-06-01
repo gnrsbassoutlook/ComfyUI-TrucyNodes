@@ -1,6 +1,25 @@
 import os
 import re
 
+# --- 辅助函数：智能提取第一个数字 ---
+def extract_numbers(text):
+    if not text or text.strip() == "":
+        return 0, 0.0
+    # 匹配第一个整数或浮点数
+    match = re.search(r"[-+]?\d*\.\d+|[-+]?\d+", text)
+    if match:
+        num_str = match.group()
+        try:
+            res_f = float(num_str)
+            res_i = int(res_f)
+            return res_i, res_f
+        except:
+            return 0, 0.0
+    return 0, 0.0
+
+# ======================================================================
+# 1. 文本索引加载器 (TrucyTxtBatchLoader)
+# ======================================================================
 class TrucyTxtBatchLoader:
     @classmethod
     def INPUT_TYPES(cls):
@@ -14,6 +33,7 @@ class TrucyTxtBatchLoader:
                 "load_cap": ("INT", {"default": -1, "min": -1, "max": 9999}),
             }
         }
+
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = ("selected_content", "selected_filename", "merged_content", "merged_with_headers")
     FUNCTION = "load_texts"
@@ -59,6 +79,9 @@ class TrucyTxtBatchLoader:
         merged_4 = "\n\n".join(all_with_headers)
         return (selected_content, selected_filename, merged_3[:1000000], merged_4[:1000000])
 
+# ======================================================================
+# 2. 文本预览与智能保存 (TrucyTxtPreviewAndSave)
+# ======================================================================
 class TrucyTxtPreviewAndSave:
     @classmethod
     def INPUT_TYPES(cls):
@@ -99,6 +122,9 @@ class TrucyTxtPreviewAndSave:
             except Exception as e: print(f"Save Error: {str(e)}")
         return {"ui": {"text": [text]}, "result": (text,)}
 
+# ======================================================================
+# 3. 文本符号嗅探器 (TrucySymbolSniffer)
+# ======================================================================
 class TrucySymbolSniffer:
     @classmethod
     def INPUT_TYPES(cls):
@@ -138,3 +164,85 @@ class TrucySymbolSniffer:
         if match_index == -1: return (-1, "N/A", text_input)
         final_val = match_index + 1 if index_base.startswith("1") else match_index
         return (final_val, str(final_val), text_input)
+
+# ======================================================================
+# 4. 智能文本切割器 (TrucyTextSlicerSmart) - 高精清洗版
+# ======================================================================
+class TrucyTextSlicerSmart:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "text_input": ("STRING", {"forceInput": True}),
+                "left_delimiter": ("STRING", {"default": "<prompt>"}),
+                "right_delimiter": ("STRING", {"default": "End]"}),
+                "match_index": ("INT", {"default": 1, "min": 1, "max": 999}),
+                "include_delimiters": ("BOOLEAN", {"default": False, "label_on": "包含符号", "label_off": "排除符号"}),
+            }
+        }
+    RETURN_TYPES = ("STRING", "INT", "FLOAT")
+    RETURN_NAMES = ("string_value", "int_value", "float_value")
+    FUNCTION = "slice_text"
+    CATEGORY = "TrucyNodes/Text"
+
+    def slice_text(self, text_input, left_delimiter, right_delimiter, match_index, include_delimiters):
+        if not text_input:
+            return ("", 0, 0.0)
+
+        # 逻辑 A：如果左右分隔符均为空，直接直通输出
+        if left_delimiter == "" and right_delimiter == "":
+            res_int, res_float = extract_numbers(text_input)
+            return (text_input.strip(), res_int, res_float)
+
+        pos = 0
+        start_pos = -1
+
+        # 定位第 N 个匹配项的左边界
+        for _ in range(match_index):
+            found = text_input.find(left_delimiter, pos)
+            if found == -1:
+                return ("OUT_OF_RANGE", 0, 0.0)
+            start_pos = found
+            pos = found + len(left_delimiter)
+
+        content_start = start_pos + len(left_delimiter)
+
+        # 根据右边界切分
+        if right_delimiter == "":
+            inner_content = text_input[content_start:]
+            string_output = text_input[start_pos:] if include_delimiters else inner_content
+        else:
+            end_pos = text_input.find(right_delimiter, content_start)
+            if end_pos == -1:
+                return ("OUT_OF_RANGE", 0, 0.0)
+            
+            inner_content = text_input[content_start:end_pos]
+            
+            if include_delimiters:
+                string_output = text_input[start_pos : end_pos + len(right_delimiter)]
+            else:
+                string_output = inner_content
+
+        # --- 核心改进：执行强力首尾清洗 (.strip()) ---
+        # 即使你敲了回车换行，输出端也会把前后的空行全部过滤掉，直接呈现顶格文字！
+        cleaned_output = string_output.strip()
+        cleaned_inner = inner_content.strip()
+
+        res_int, res_float = extract_numbers(cleaned_inner)
+
+        return (cleaned_output, res_int, res_float)
+
+
+NODE_CLASS_MAPPINGS = {
+    "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
+    "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
+    "TrucySymbolSniffer": TrucySymbolSniffer,
+    "TrucyTextSlicerSmart": TrucyTextSlicerSmart  
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
+    "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
+    "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)"  
+}
