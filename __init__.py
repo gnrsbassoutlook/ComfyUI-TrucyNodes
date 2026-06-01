@@ -2,17 +2,17 @@
 
 # 1. 基础模块导入
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator
-# 核心修改：这里加入了新节点 TrucyTextSlicerSmart
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextSlicerSmart
 from .excel_nodes import TrucyExcelReader
 from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
-from .image_adapter import TrucyImageAdapter
+# 迁移：在这里导入 TrucyImageAdapter 和拼图节点（5图/10图版）
+from .image_adapter import TrucyImageAdapter, TrucyAssetGrid5, TrucyAssetGrid10
 
-# 2. 工业工具箱导入
+# 2. 工业工具箱导入 (移除了拼图，已经变轻)
 from .trucy_toolkit import (
     TrucyImageLoaderString5, TrucyImageLoaderString10, 
     TrucyFolderIterator, TrucyPromptSplitter5, TrucyPromptSplitter10,
-    TrucyIDExtractor, TrucyStringSlicer, TrucyAssetGrid5, TrucyAssetGrid10, TrucyDatasetSaver
+    TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
 )
 
 # 3. 视频合成模块安全导入
@@ -28,7 +28,7 @@ from .trucy_loop import (
 )
 
 # ========================================================
-# 节点类名映射
+# 节点类名映射 (ComfyUI 内部逻辑识别)
 # ========================================================
 NODE_CLASS_MAPPINGS = {
     # 音频工具组
@@ -40,13 +40,16 @@ NODE_CLASS_MAPPINGS = {
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
     "TrucySymbolSniffer": TrucySymbolSniffer,
-    "TrucyTextSlicerSmart": TrucyTextSlicerSmart, # 新增
+    "TrucyTextSlicerSmart": TrucyTextSlicerSmart,
     
     # 核心溶图与分辨率适配
     "TrucyExcelReader": TrucyExcelReader,
-    "TrucyKleinEncode": TrucyKleinEncode,
-    "TrucyKleinEncode5": TrucyKleinEncode5,
+    "TrucyKleinEncode": TrucyKleinEncode,       
+    "TrucyKleinEncode5": TrucyKleinEncode5,     
     "TrucyImageAdapter": TrucyImageAdapter,
+    # 拼图节点映射移到这里：
+    "TrucyAssetGrid5": TrucyAssetGrid5,
+    "TrucyAssetGrid10": TrucyAssetGrid10,
     
     # Trucy Toolkit 工业工具箱
     "TrucyImageLoaderString5": TrucyImageLoaderString5,
@@ -56,8 +59,6 @@ NODE_CLASS_MAPPINGS = {
     "TrucyPromptSplitter10": TrucyPromptSplitter10,
     "TrucyIDExtractor": TrucyIDExtractor,
     "TrucyStringSlicer": TrucyStringSlicer,
-    "TrucyAssetGrid5": TrucyAssetGrid5,
-    "TrucyAssetGrid10": TrucyAssetGrid10,
     "TrucyDatasetSaver": TrucyDatasetSaver,
     
     # 逻辑循环 (9通道版与2通道版)
@@ -71,7 +72,7 @@ if TrucyVideoCombine:
     NODE_CLASS_MAPPINGS["TrucyVideoCombine"] = TrucyVideoCombine
 
 # ========================================================
-# 节点显示名称映射
+# 节点显示名称映射 (ComfyUI 菜单 UI 显示)
 # ========================================================
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAudioLoaderIndex": "🚀 Audio Loader by Index (Trucy)",
@@ -80,11 +81,16 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
-    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)", # 新增
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)",
     "TrucyExcelReader": "🚀 Excel Cell Reader (Trucy)",
     "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
     "TrucyKleinEncode5": "🚀 Klein-Model Text Encode (5ch) (Trucy)",
+    
+    # 图像处理类显示名称
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
+    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (5)",
+    "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
+    
     "TrucyImageLoaderString5": "🚀 Trucy Image Loader (String 5)",
     "TrucyImageLoaderString10": "🚀 Trucy Image Loader (String 10)",
     "TrucyFolderIterator": "🚀 Trucy Folder Iterator",
@@ -92,8 +98,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyPromptSplitter10": "🚀 Trucy Text Splitter (10)",
     "TrucyIDExtractor": "🚀 Trucy ID Extractor",
     "TrucyStringSlicer": "🚀 Trucy String Slicer",
-    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (5)",
-    "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
