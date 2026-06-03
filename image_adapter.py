@@ -1,10 +1,12 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
-import math
-from PIL import Image, ImageDraw, ImageFont, ImageOps
 import comfy.utils
+import os, math, numpy as np
+from PIL import Image, ImageDraw, ImageFont
 
+# ========================================================
+# 1. 核心适配节点 (保持不变)
+# ========================================================
 class TrucyImageAdapter:
     @classmethod
     def INPUT_TYPES(cls):
@@ -26,7 +28,6 @@ class TrucyImageAdapter:
         _, current_h, current_w, _ = image.shape
         if current_h == target_height and current_w == target_width:
             return (image,)
-
         if mode == "Stretch":
             samples = image.movedim(-1, 1)
             out = comfy.utils.common_upscale(samples, target_width, target_height, "bicubic", "disabled")
@@ -37,101 +38,114 @@ class TrucyImageAdapter:
             height_ratio = target_height / current_h
             scale_ratio = max(width_ratio, height_ratio)
             new_w, new_h = int(current_w * scale_ratio), int(current_h * scale_ratio)
-            image_scaled = comfy.utils.common_upscale(samples, new_w, new_h, "bicubic", "disabled").movedim(1, -1)
+            image_scaled = comfy.utils.common_upscale(samples, new_w, new_h, "bicubic", "disabled")
+            image_scaled = image_scaled.movedim(1, -1)
             y_start = (new_h - target_height) // 2
             x_start = (new_w - target_width) // 2
-            return (image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :],)
-
+            out = image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :]
+            return (out,)
 
 # ========================================================
-# 🚀 智能防粘连网格拼图基类 (专为 VLM 识别优化)
+# 2. 资产拼接网关 (视觉增强版 V5 - 完美水平对齐标签)
 # ========================================================
 class BaseTrucyGrid:
     def create_grid(self, thumbnail_size, columns, add_labels, count, **kwargs):
-        valid_images = []
+        valid_imgs = []
         for i in range(1, count + 1):
-            img_tensor = kwargs.get(f"img_{i}")
-            if img_tensor is not None:
-                t = img_tensor[0].cpu().numpy()
-                pil_img = Image.fromarray(np.clip(255. * t, 0, 255).astype(np.uint8))
-                valid_images.append((i, pil_img))
-
-        if not valid_images:
+            img = kwargs.get(f"img_{i}")
+            if img is not None:
+                pimg = Image.fromarray(np.clip(255. * img[0].cpu().numpy(), 0, 255).astype(np.uint8))
+                valid_imgs.append((i, pimg))
+        
+        if not valid_imgs:
             return (torch.zeros((1, 512, 512, 3)),)
 
-        # 核心尺寸计算 (增加 40px 物理安全带)
-        margin = 40
-        cell_w = thumbnail_size + margin
-        cell_h = thumbnail_size + margin
+        cell_max = int(thumbnail_size)
+        rows = math.ceil(len(valid_imgs) / columns)
         
-        # 自适应字体大小计算 (最舒适的比例)
-        font_size = max(16, int(thumbnail_size * 0.08))
-        label_h = int(font_size * 1.8) if add_labels else 0
+        # --- 比例参数控制 ---
+        border_thickness = max(4, int(cell_max * 0.03)) # 3% 比例白边
+        margin = int(cell_max * 0.05)       # 画布边缘留白
+        spacing = int(cell_max * 0.15)      # 图片横向/纵向间隔
+        font_size = int(cell_max * 0.12)    # 标签字体大小
+        text_area_height = int(font_size * 1.3) # 标签占用的垂直高度
+        text_offset_y = 5                   # 文字距离格子底部的偏移
+        
+        # 缩放图片
+        processed_data = []
+        for orig_idx, pimg in valid_imgs:
+            # 限制在 cell_max 减去边框后的区域内
+            pimg.thumbnail((cell_max - border_thickness*2, cell_max - border_thickness*2), Image.Resampling.LANCZOS)
+            processed_data.append((orig_idx, pimg))
 
-        rows = math.ceil(len(valid_images) / columns)
-        grid_w = columns * cell_w
-        grid_h = rows * (cell_h + label_h)
-
-        # 创建纯黑背景，这是 VLM 最喜欢的背景色，能形成高对比度
-        grid_img = Image.new('RGB', (grid_w, grid_h), color=(0, 0, 0))
-        draw = ImageDraw.Draw(grid_img)
-
-        # 尝试加载标准字体
-        try: font = ImageFont.truetype("arial.ttf", font_size)
+        # 计算总画布尺寸
+        # 高度计算公式：(行数 * 格子高度) + (文字区域) + (间隔) + (边缘)
+        grid_w = (columns * cell_max) + ((columns - 1) * spacing) + (2 * margin)
+        grid_h = (rows * (cell_max + text_area_height)) + ((rows - 1) * spacing) + (2 * margin)
+        
+        grid = Image.new('RGB', (grid_w, grid_h), (0, 0, 0))
+        draw = ImageDraw.Draw(grid)
+        
+        # 字体加载
+        try:
+            font_paths = ["arial.ttf", "msyh.ttc", "DejaVuSans.ttf"]
+            font = None
+            for p in font_paths:
+                try: font = ImageFont.truetype(p, font_size); break
+                except: continue
+            if font is None: font = ImageFont.load_default()
         except: font = ImageFont.load_default()
 
-        for idx, (original_idx, pimg) in enumerate(valid_images):
-            r = idx // columns
-            c = idx % columns
+        for idx, (original_idx, pimg) in enumerate(processed_data):
+            row, col = idx // columns, idx % columns
             
-            # 计算当前格子的左上角坐标
-            x_offset = c * cell_w
-            y_offset = r * (cell_h + label_h)
-
-            # 等比例缩放图片，使其长边不超过设定尺寸
-            pimg.thumbnail((thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS)
+            # 每个格子的起始坐标（左上角）
+            cell_x = margin + (col * (cell_max + spacing))
+            cell_y = margin + (row * (cell_max + text_area_height + spacing))
             
-            # 计算图片居中位置
-            paste_x = x_offset + (cell_w - pimg.width) // 2
-            paste_y = y_offset + (cell_h - pimg.height) // 2
-
-            # 【防粘连白框】：在图片外围画一圈 3 像素宽的白色亮框
-            border_rect = [paste_x - 3, paste_y - 3, paste_x + pimg.width + 2, paste_y + pimg.height + 2]
-            draw.rectangle(border_rect, outline=(255, 255, 255), width=3)
-
-            # 粘贴原图
-            grid_img.paste(pimg, (paste_x, paste_y))
-
-            # 【智能 Label】：绘制巨大的 imgX 标签，水平居中对齐在图片下方
+            # 1. 绘制“比例贴合”的白色相框
+            bw, bh = pimg.width + border_thickness * 2, pimg.height + border_thickness * 2
+            
+            # 在 cell_max 区域内居中（这能保证图片中心对齐，不管横竖）
+            bx = cell_x + (cell_max - bw) // 2
+            by = cell_y + (cell_max - bh) // 2
+            
+            draw.rectangle([bx, by, bx + bw, by + bh], fill=(255, 255, 255))
+            
+            # 2. 粘贴图片
+            grid.paste(pimg, (bx + border_thickness, by + border_thickness))
+            
+            # 3. 绘制文字标签 (重点：使用 cell_y + cell_max 作为统一基准线)
             if add_labels:
-                label_text = f"img{original_idx}"
-                # 兼容不同 PIL 版本的文本测宽
-                if hasattr(draw, "textbbox"):
-                    text_w = draw.textbbox((0, 0), label_text, font=font)[2]
-                else:
-                    text_w = len(label_text) * (font_size * 0.6)
+                label_txt = f"img{original_idx}"
+                # 计算居中 X 坐标
+                tw = draw.textlength(label_txt, font=font) if hasattr(draw, "textlength") else font_size * 2
+                tx = cell_x + (cell_max - tw) // 2
                 
-                text_x = x_offset + (cell_w - text_w) // 2
-                text_y = y_offset + cell_h
-                draw.text((text_x, text_y), label_text, fill=(240, 240, 240), font=font)
+                # 统一高度：当前格子的底边 + 固定偏移
+                # 这样无论上面的相框bh是多少，文字 ty 永远在同一水平线上
+                ty = cell_y + cell_max + text_offset_y
+                
+                draw.text((tx, ty), label_txt, fill=(180, 180, 180), font=font)
 
-        # 导出为张量
-        output_tensor = torch.from_numpy(np.array(grid_img).astype(np.float32) / 255.0).unsqueeze(0)
-        return (output_tensor,)
+        # 转回 Torch
+        result = torch.from_numpy(np.array(grid).astype(np.float32) / 255.0).unsqueeze(0)
+        return (result,)
 
 class TrucyAssetGrid5(BaseTrucyGrid):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                # 经典分辨率下拉菜单，防傻瓜式输入
-                "thumbnail_size": ([256, 512, 768, 1024, 1280, 1920], {"default": 512}),
-                "columns": ("INT", {"default": 5, "min": 1, "max": 5}),
+                "thumbnail_size": (["256", "512", "768", "1024", "1280", "1920"], {"default": "512"}),
+                "columns": ("INT", {"default": 5, "min": 1, "max": 10}),
                 "add_labels": ("BOOLEAN", {"default": True}),
             },
             "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 6)}
         }
-    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",), ("Grid",), "run", "TrucyNodes/Image"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "run"
+    CATEGORY = "TrucyNodes/Image"
     def run(self, **kwargs): return self.create_grid(count=5, **kwargs)
 
 class TrucyAssetGrid10(BaseTrucyGrid):
@@ -139,15 +153,20 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "thumbnail_size": ([256, 512, 768, 1024, 1280, 1920], {"default": 256}),
-                "columns": ("INT", {"default": 5, "min": 1, "max": 10}),
+                "thumbnail_size": (["256", "512", "768", "1024", "1280", "1920"], {"default": "512"}),
+                "columns": ("INT", {"default": 5, "min": 1, "max": 20}),
                 "add_labels": ("BOOLEAN", {"default": True}),
             },
             "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 11)}
         }
-    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",), ("Grid",), "run", "TrucyNodes/Image"
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "run"
+    CATEGORY = "TrucyNodes/Image"
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
 
+# ========================================================
+# 映射导出
+# ========================================================
 NODE_CLASS_MAPPINGS = {
     "TrucyImageAdapter": TrucyImageAdapter,
     "TrucyAssetGrid5": TrucyAssetGrid5,
@@ -155,7 +174,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
-    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (5)",
-    "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)"
+    "TrucyImageAdapter": "Image Size Adapter (Trucy)",
+    "TrucyAssetGrid5": "🚀 Asset Grid (5ch) (Trucy)",
+    "TrucyAssetGrid10": "🚀 Asset Grid (10ch) (Trucy)"
 }
