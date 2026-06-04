@@ -46,7 +46,7 @@ class TrucyImageAdapter:
             return (out,)
 
 # ========================================================
-# 2. 资产拼接网关 (视觉增强版 V5 - 完美水平对齐标签)
+# 2. 资产拼接网关 (视觉增强版 V7 - 极细边框 & 标签紧贴)
 # ========================================================
 class BaseTrucyGrid:
     def create_grid(self, thumbnail_size, columns, add_labels, count, **kwargs):
@@ -63,30 +63,27 @@ class BaseTrucyGrid:
         cell_max = int(thumbnail_size)
         rows = math.ceil(len(valid_imgs) / columns)
         
-        # --- 比例参数控制 ---
-        border_thickness = max(4, int(cell_max * 0.03)) # 3% 比例白边
-        margin = int(cell_max * 0.05)       # 画布边缘留白
-        spacing = int(cell_max * 0.15)      # 图片横向/纵向间隔
-        font_size = int(cell_max * 0.12)    # 标签字体大小
-        text_area_height = int(font_size * 1.3) # 标签占用的垂直高度
-        text_offset_y = 5                   # 文字距离格子底部的偏移
+        # --- 精调比例参数 ---
+        border_thickness = max(1, int(cell_max * 0.015))  # 极细白色框 (再减 5%)
+        margin = int(cell_max * 0.02)                    # 边缘留白
+        spacing = int(cell_max * 0.15)                   # 图片间距
+        font_size = int(cell_max * 0.10)                 # 字体大小
+        text_area_height = int(font_size * 1.5) 
+        text_offset_y = -int(cell_max * 0.05)            # 文字大幅上提，紧贴相框
         
         # 缩放图片
         processed_data = []
         for orig_idx, pimg in valid_imgs:
-            # 限制在 cell_max 减去边框后的区域内
             pimg.thumbnail((cell_max - border_thickness*2, cell_max - border_thickness*2), Image.Resampling.LANCZOS)
             processed_data.append((orig_idx, pimg))
 
-        # 计算总画布尺寸
-        # 高度计算公式：(行数 * 格子高度) + (文字区域) + (间隔) + (边缘)
+        # 计算画布 (深墨绿色底: 0, 50, 0)
         grid_w = (columns * cell_max) + ((columns - 1) * spacing) + (2 * margin)
         grid_h = (rows * (cell_max + text_area_height)) + ((rows - 1) * spacing) + (2 * margin)
         
-        grid = Image.new('RGB', (grid_w, grid_h), (0, 0, 0))
+        grid = Image.new('RGB', (grid_w, grid_h), (0, 50, 0))
         draw = ImageDraw.Draw(grid)
         
-        # 字体加载
         try:
             font_paths = ["arial.ttf", "msyh.ttc", "DejaVuSans.ttf"]
             font = None
@@ -98,37 +95,25 @@ class BaseTrucyGrid:
 
         for idx, (original_idx, pimg) in enumerate(processed_data):
             row, col = idx // columns, idx % columns
-            
-            # 每个格子的起始坐标（左上角）
             cell_x = margin + (col * (cell_max + spacing))
             cell_y = margin + (row * (cell_max + text_area_height + spacing))
             
-            # 1. 绘制“比例贴合”的白色相框
             bw, bh = pimg.width + border_thickness * 2, pimg.height + border_thickness * 2
-            
-            # 在 cell_max 区域内居中（这能保证图片中心对齐，不管横竖）
             bx = cell_x + (cell_max - bw) // 2
             by = cell_y + (cell_max - bh) // 2
             
+            # 绘制白色相框
             draw.rectangle([bx, by, bx + bw, by + bh], fill=(255, 255, 255))
-            
-            # 2. 粘贴图片
             grid.paste(pimg, (bx + border_thickness, by + border_thickness))
             
-            # 3. 绘制文字标签 (重点：使用 cell_y + cell_max 作为统一基准线)
+            # 绘制标签 (白色字体)
             if add_labels:
                 label_txt = f"img{original_idx}"
-                # 计算居中 X 坐标
                 tw = draw.textlength(label_txt, font=font) if hasattr(draw, "textlength") else font_size * 2
                 tx = cell_x + (cell_max - tw) // 2
-                
-                # 统一高度：当前格子的底边 + 固定偏移
-                # 这样无论上面的相框bh是多少，文字 ty 永远在同一水平线上
                 ty = cell_y + cell_max + text_offset_y
-                
-                draw.text((tx, ty), label_txt, fill=(180, 180, 180), font=font)
+                draw.text((tx, ty), label_txt, fill=(255, 255, 255), font=font)
 
-        # 转回 Torch
         result = torch.from_numpy(np.array(grid).astype(np.float32) / 255.0).unsqueeze(0)
         return (result,)
 
@@ -164,9 +149,6 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     CATEGORY = "TrucyNodes/Image"
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
 
-# ========================================================
-# 映射导出
-# ========================================================
 NODE_CLASS_MAPPINGS = {
     "TrucyImageAdapter": TrucyImageAdapter,
     "TrucyAssetGrid5": TrucyAssetGrid5,
