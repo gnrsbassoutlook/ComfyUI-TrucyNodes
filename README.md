@@ -10,14 +10,12 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
-### [2024-05-06] Major Upgrade: Intelligence & Connectivity Expansion
-🚀 Ultra-Splitter 2.0: Refactored Trucy Text Splitter (5 & 10) into high-capacity nodes.
-Tri-Type Output: Each segment now simultaneously outputs String, Integer, and Float.
-Smart Extraction: Built-in regex engine automatically extracts the first number from text (e.g., "04.Character" -> Int: 4).
-Massive Delimiters: Expanded the separator list to include almost all special characters (~!@#$%^&*()-+_{}[]|<>:;./\).
-🎯 Trucy ID Extractor: Upgraded to support 2-character IDs (like X1) by making the 3rd slot optional. Improved "Auto" mode to catch short alphanumeric strings.
-📁 Consolidate & Clean: Finalized trucy_toolkit.py to house all utility nodes, resulting in a cleaner file structure and faster ComfyUI boot times.
-🛡️ Bug Fixes: Corrected node mapping for TrucyAssetGrid5 to ensure stable UI rendering.
+### [2026-06-26] The "Director's Cut" Update: Precision & Performance
+🛡️ New Feature: Trucy Image Bridge (5ch/10ch): Introduced a lossless image passthrough node designed to clean up complex workspaces.
+Zero Overhead: Uses pure Python pointer pass-through. Consumes 0 MB of VRAM/RAM.
+Smart Blockers: Features built-in disable_out boolean toggles powered by ComfyUI's native ExecutionBlocker. Turning a channel "OFF" will physically halt all downstream nodes (KSamplers, Video Encoders) connected to it, saving massive amounts of compute time during testing.
+🔢 Trucy Text To Number Converter: Simplified the input mechanism. The node now features a direct text-input box (removed forceInput), allowing manual typing while still outputting perfectly extracted Strings, Integers, and Floats.
+✨ Polish & Cleanup: Refined image_adapter.py by removing redundant boolean inputs from the Bridge nodes to keep the UI clean and strictly functional.
 
 ## 🚀 Core Modules
 

@@ -1,11 +1,20 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
+import math
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import comfy.utils
-import os, math, numpy as np
-from PIL import Image, ImageDraw, ImageFont
+
+# 引入阻断器 (用于 disable_out)
+try:
+    from comfy_execution.graph import ExecutionBlocker
+except ImportError:
+    class ExecutionBlocker:
+        def __init__(self, value):
+            self.value = value
 
 # ========================================================
-# 1. 核心适配节点 (保持不变)
+# 1. 图像分辨率适配器
 # ========================================================
 class TrucyImageAdapter:
     @classmethod
@@ -28,6 +37,7 @@ class TrucyImageAdapter:
         _, current_h, current_w, _ = image.shape
         if current_h == target_height and current_w == target_width:
             return (image,)
+
         if mode == "Stretch":
             samples = image.movedim(-1, 1)
             out = comfy.utils.common_upscale(samples, target_width, target_height, "bicubic", "disabled")
@@ -38,99 +48,73 @@ class TrucyImageAdapter:
             height_ratio = target_height / current_h
             scale_ratio = max(width_ratio, height_ratio)
             new_w, new_h = int(current_w * scale_ratio), int(current_h * scale_ratio)
-            image_scaled = comfy.utils.common_upscale(samples, new_w, new_h, "bicubic", "disabled")
-            image_scaled = image_scaled.movedim(1, -1)
+            image_scaled = comfy.utils.common_upscale(samples, new_w, new_h, "bicubic", "disabled").movedim(1, -1)
             y_start = (new_h - target_height) // 2
             x_start = (new_w - target_width) // 2
-            out = image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :]
-            return (out,)
+            return (image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :],)
 
 # ========================================================
-# 2. 资产拼接网关 (视觉增强版 V7 - 极细边框 & 标签紧贴)
+# 2. VLM 专用防粘连资产网格
 # ========================================================
 class BaseTrucyGrid:
     def create_grid(self, thumbnail_size, columns, add_labels, count, **kwargs):
-        valid_imgs = []
+        valid_images = []
         for i in range(1, count + 1):
-            img = kwargs.get(f"img_{i}")
-            if img is not None:
-                pimg = Image.fromarray(np.clip(255. * img[0].cpu().numpy(), 0, 255).astype(np.uint8))
-                valid_imgs.append((i, pimg))
-        
-        if not valid_imgs:
-            return (torch.zeros((1, 512, 512, 3)),)
+            img_tensor = kwargs.get(f"img_{i}")
+            if img_tensor is not None:
+                t = img_tensor[0].cpu().numpy()
+                pil_img = Image.fromarray(np.clip(255. * t, 0, 255).astype(np.uint8))
+                valid_images.append((i, pil_img))
 
-        cell_max = int(thumbnail_size)
-        rows = math.ceil(len(valid_imgs) / columns)
-        
-        # --- 精调比例参数 ---
-        border_thickness = max(1, int(cell_max * 0.015))  # 极细白色框 (再减 5%)
-        margin = int(cell_max * 0.02)                    # 边缘留白
-        spacing = int(cell_max * 0.15)                   # 图片间距
-        font_size = int(cell_max * 0.10)                 # 字体大小
-        text_area_height = int(font_size * 1.5) 
-        text_offset_y = -int(cell_max * 0.05)            # 文字大幅上提，紧贴相框
-        
-        # 缩放图片
-        processed_data = []
-        for orig_idx, pimg in valid_imgs:
-            pimg.thumbnail((cell_max - border_thickness*2, cell_max - border_thickness*2), Image.Resampling.LANCZOS)
-            processed_data.append((orig_idx, pimg))
+        if not valid_images: return (torch.zeros((1, 512, 512, 3)),)
+        margin = 40
+        cell_w = thumbnail_size + margin
+        cell_h = thumbnail_size + margin
+        font_size = max(16, int(thumbnail_size * 0.08))
+        label_h = int(font_size * 1.8) if add_labels else 0
 
-        # 计算画布 (深墨绿色底: 0, 50, 0)
-        grid_w = (columns * cell_max) + ((columns - 1) * spacing) + (2 * margin)
-        grid_h = (rows * (cell_max + text_area_height)) + ((rows - 1) * spacing) + (2 * margin)
-        
-        grid = Image.new('RGB', (grid_w, grid_h), (0, 50, 0))
-        draw = ImageDraw.Draw(grid)
-        
-        try:
-            font_paths = ["arial.ttf", "msyh.ttc", "DejaVuSans.ttf"]
-            font = None
-            for p in font_paths:
-                try: font = ImageFont.truetype(p, font_size); break
-                except: continue
-            if font is None: font = ImageFont.load_default()
+        rows = math.ceil(len(valid_images) / columns)
+        grid_w = columns * cell_w
+        grid_h = rows * (cell_h + label_h)
+        grid_img = Image.new('RGB', (grid_w, grid_h), color=(0, 0, 0))
+        draw = ImageDraw.Draw(grid_img)
+        try: font = ImageFont.truetype("arial.ttf", font_size)
         except: font = ImageFont.load_default()
 
-        for idx, (original_idx, pimg) in enumerate(processed_data):
-            row, col = idx // columns, idx % columns
-            cell_x = margin + (col * (cell_max + spacing))
-            cell_y = margin + (row * (cell_max + text_area_height + spacing))
-            
-            bw, bh = pimg.width + border_thickness * 2, pimg.height + border_thickness * 2
-            bx = cell_x + (cell_max - bw) // 2
-            by = cell_y + (cell_max - bh) // 2
-            
-            # 绘制白色相框
-            draw.rectangle([bx, by, bx + bw, by + bh], fill=(255, 255, 255))
-            grid.paste(pimg, (bx + border_thickness, by + border_thickness))
-            
-            # 绘制标签 (白色字体)
-            if add_labels:
-                label_txt = f"img{original_idx}"
-                tw = draw.textlength(label_txt, font=font) if hasattr(draw, "textlength") else font_size * 2
-                tx = cell_x + (cell_max - tw) // 2
-                ty = cell_y + cell_max + text_offset_y
-                draw.text((tx, ty), label_txt, fill=(255, 255, 255), font=font)
+        for idx, (original_idx, pimg) in enumerate(valid_images):
+            r = idx // columns
+            c = idx % columns
+            x_offset = c * cell_w
+            y_offset = r * (cell_h + label_h)
+            pimg.thumbnail((thumbnail_size, thumbnail_size), Image.Resampling.LANCZOS)
+            paste_x = x_offset + (cell_w - pimg.width) // 2
+            paste_y = y_offset + (cell_h - pimg.height) // 2
 
-        result = torch.from_numpy(np.array(grid).astype(np.float32) / 255.0).unsqueeze(0)
-        return (result,)
+            border_rect = [paste_x - 3, paste_y - 3, paste_x + pimg.width + 2, paste_y + pimg.height + 2]
+            draw.rectangle(border_rect, outline=(255, 255, 255), width=3)
+            grid_img.paste(pimg, (paste_x, paste_y))
+
+            if add_labels:
+                label_text = f"img{original_idx}"
+                if hasattr(draw, "textbbox"): text_w = draw.textbbox((0, 0), label_text, font=font)[2]
+                else: text_w = len(label_text) * (font_size * 0.6)
+                draw.text((x_offset + (cell_w - text_w) // 2, y_offset + cell_h), label_text, fill=(240, 240, 240), font=font)
+
+        output_tensor = torch.from_numpy(np.array(grid_img).astype(np.float32) / 255.0).unsqueeze(0)
+        return (output_tensor,)
 
 class TrucyAssetGrid5(BaseTrucyGrid):
     @classmethod
     def INPUT_TYPES(s):
         return {
             "required": {
-                "thumbnail_size": (["256", "512", "768", "1024", "1280", "1920"], {"default": "512"}),
-                "columns": ("INT", {"default": 5, "min": 1, "max": 10}),
+                "thumbnail_size": ([256, 512, 768, 1024, 1280, 1920], {"default": 512}),
+                "columns": ("INT", {"default": 5, "min": 1, "max": 5}),
                 "add_labels": ("BOOLEAN", {"default": True}),
             },
             "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 6)}
         }
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "run"
-    CATEGORY = "TrucyNodes/Image"
+    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",), ("Grid",), "run", "TrucyNodes/Image"
     def run(self, **kwargs): return self.create_grid(count=5, **kwargs)
 
 class TrucyAssetGrid10(BaseTrucyGrid):
@@ -138,25 +122,78 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     def INPUT_TYPES(s):
         return {
             "required": {
-                "thumbnail_size": (["256", "512", "768", "1024", "1280", "1920"], {"default": "512"}),
-                "columns": ("INT", {"default": 5, "min": 1, "max": 20}),
+                "thumbnail_size": ([256, 512, 768, 1024, 1280, 1920], {"default": 256}),
+                "columns": ("INT", {"default": 5, "min": 1, "max": 10}),
                 "add_labels": ("BOOLEAN", {"default": True}),
             },
             "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 11)}
         }
-    RETURN_TYPES = ("IMAGE",)
-    FUNCTION = "run"
-    CATEGORY = "TrucyNodes/Image"
+    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",), ("Grid",), "run", "TrucyNodes/Image"
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
+
+# ========================================================
+# 3. 🚀 纯图像无损直通桥接器 (精简版：仅保留 disable_out)
+# ========================================================
+class TrucyImageBridge5:
+    @classmethod
+    def INPUT_TYPES(cls):
+        inputs = {"required": {}, "optional": {}}
+        for i in range(1, 6):
+            # 删除了 disable_in，仅保留极具战术价值的 disable_out
+            inputs["required"][f"disable_out_{i}"] = ("BOOLEAN", {"default": False, "label_on": f"Out {i} OFF", "label_off": f"Out {i} ON"})
+            inputs["optional"][f"img{i}"] = ("IMAGE",)
+        return inputs
+
+    RETURN_TYPES = ("IMAGE",) * 5
+    RETURN_NAMES = tuple(f"img{i}" for i in range(1, 6))
+    FUNCTION = "bridge"
+    CATEGORY = "TrucyNodes/Image"
+
+    def bridge(self, **kwargs):
+        results = []
+        for i in range(1, 6):
+            disable_out = kwargs.get(f"disable_out_{i}", False)
+            img = kwargs.get(f"img{i}", None)
+            
+            # 核心：利用 ExecutionBlocker 从源头切断下游的运行
+            if disable_out: 
+                results.append(ExecutionBlocker(None))
+            else: 
+                results.append(img)
+                
+        return tuple(results)
+
+class TrucyImageBridge10:
+    @classmethod
+    def INPUT_TYPES(cls):
+        inputs = {"required": {}, "optional": {}}
+        for i in range(1, 11):
+            inputs["required"][f"disable_out_{i}"] = ("BOOLEAN", {"default": False, "label_on": f"Out {i} OFF", "label_off": f"Out {i} ON"})
+            inputs["optional"][f"img{i}"] = ("IMAGE",)
+        return inputs
+
+    RETURN_TYPES = ("IMAGE",) * 10
+    RETURN_NAMES = tuple(f"img{i}" for i in range(1, 11))
+    FUNCTION = "bridge"
+    CATEGORY = "TrucyNodes/Image"
+
+    def bridge(self, **kwargs):
+        results = []
+        for i in range(1, 11):
+            disable_out = kwargs.get(f"disable_out_{i}", False)
+            img = kwargs.get(f"img{i}", None)
+            
+            if disable_out: 
+                results.append(ExecutionBlocker(None))
+            else: 
+                results.append(img)
+                
+        return tuple(results)
 
 NODE_CLASS_MAPPINGS = {
     "TrucyImageAdapter": TrucyImageAdapter,
     "TrucyAssetGrid5": TrucyAssetGrid5,
-    "TrucyAssetGrid10": TrucyAssetGrid10
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyImageAdapter": "Image Size Adapter (Trucy)",
-    "TrucyAssetGrid5": "🚀 Asset Grid (5ch) (Trucy)",
-    "TrucyAssetGrid10": "🚀 Asset Grid (10ch) (Trucy)"
+    "TrucyAssetGrid10": TrucyAssetGrid10,
+    "TrucyImageBridge5": TrucyImageBridge5,
+    "TrucyImageBridge10": TrucyImageBridge10
 }
