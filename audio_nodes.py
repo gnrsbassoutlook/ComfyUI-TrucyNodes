@@ -5,7 +5,7 @@ import torchaudio
 import torch.nn.functional as F
 
 # ======================================================================
-# 1. 音频加载器 (TrucyAudioLoaderIndex)
+# 1. 智能索引音频加载器 (TrucyAudioLoaderIndex)
 # ======================================================================
 class TrucyAudioLoaderIndex:
     @classmethod
@@ -16,7 +16,7 @@ class TrucyAudioLoaderIndex:
                 "index_mode": (["0-based (0,1,2...)", "1-based (1,2,3...)"], {"default": "0-based (0,1,2...)"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 999999}),
                 "sort_by": (["Alphabetical (A-Z)", "Creation Time (Oldest First)"], {"default": "Alphabetical (A-Z)"}),
-                "target_sample_rate": ([44100, 48000, 16000, 22050, 24000, 8000], {"default": 44100}),
+                "target_sample_rate": ([44100, 48000, 16000, 22050, 24000, 8000], {"default": 48000}), # 统一默认48k
                 "skip_first": ("INT", {"default": 0, "min": 0, "max": 9999}),
                 "load_cap": ("INT", {"default": -1, "min": -1, "max": 9999}),
             }
@@ -27,7 +27,7 @@ class TrucyAudioLoaderIndex:
     @classmethod
     def IS_CHANGED(cls, directory_path, **kwargs):
         path = directory_path.strip().replace('"', '')
-        return os.getmtime(path) if os.path.isdir(path) else float("NaN")
+        return os.path.getmtime(path) if os.path.isdir(path) else float("NaN")
 
     def load(self, directory_path, index_mode, index, sort_by, target_sample_rate, skip_first, load_cap):
         path = directory_path.strip().replace('"', '')
@@ -61,8 +61,8 @@ class AudioLengthDetector:
         return {
             "required": {
                 "audio": ("AUDIO", ),
-                "fps": ("INT", {"default": 24, "min": 1, "max": 120}),
-                "target_sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}),
+                "fps": ("INT", {"default": 25, "min": 1, "max": 120}), # 默认改为25fps
+                "target_sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}), # 默认改为48k
                 "channel_mode": (["Stereo (立体声)", "Mono (单声道)"], {"default": "Stereo (立体声)"}),
                 "pre_pad": ("BOOLEAN", {"default": False, "label_on": "PRE-ON", "label_off": "OFF"}),
                 "pre_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "500ms"}),
@@ -70,7 +70,8 @@ class AudioLengthDetector:
                 "post_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "250ms"}),
             }
         }
-    RETURN_TYPES, RETURN_NAMES = ("AUDIO", "FLOAT", "INT"), ("audio", "length_sec", "total_frames")
+    # 统一命名为 total_sec
+    RETURN_TYPES, RETURN_NAMES = ("AUDIO", "FLOAT", "INT"), ("audio", "total_sec", "total_frames")
     FUNCTION, CATEGORY, OUTPUT_NODE = "process", "TrucyNodes/Audio", True
 
     def process(self, audio, fps, target_sample_rate, channel_mode, pre_pad, pre_ms, post_pad, post_ms):
@@ -118,15 +119,31 @@ class EmptyAudioGenerator:
             "required": {
                 "mode": (["Seconds", "Frames"], {"default": "Seconds"}),
                 "seconds": ("FLOAT", {"default": 1.0, "min": 0.0, "step": 0.001}),
-                "frames": ("INT", {"default": 24, "min": 0}),
-                "fps": ("INT", {"default": 24, "min": 1}),
-                "sample_rate": ([44100, 48000, 16000], {"default": 44100}),
+                "frames": ("INT", {"default": 25, "min": 0}), # 默认改为25帧
+                "fps": ("INT", {"default": 25, "min": 1}),    # 默认改为25fps
+                "sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}), # 默认48k
                 "channels": (["Stereo", "Mono"], {"default": "Stereo"}),
             }
         }
-    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("AUDIO", "FLOAT", "INT"), ("audio", "length_sec", "total_samples"), "gen", "TrucyNodes/Audio"
+    
+    # 核心修改：将 total_samples 改为 total_frames，并统一时长命名为 total_sec
+    RETURN_TYPES = ("AUDIO", "FLOAT", "INT")
+    RETURN_NAMES = ("audio", "total_sec", "total_frames")
+    FUNCTION = "gen"
+    CATEGORY = "TrucyNodes/Audio"
+    
     def gen(self, mode, seconds, frames, fps, sample_rate, channels):
-        dur = frames / fps if mode == "Frames" else seconds
+        # 统一计算总秒数
+        if mode == "Frames":
+            total_sec = frames / fps
+            total_frames = frames
+        else:
+            total_sec = seconds
+            total_frames = round(seconds * fps)
+            
         chan = 2 if channels == "Stereo" else 1
-        w = torch.zeros((1, chan, int(dur * sample_rate)))
-        return ({"waveform": w, "sample_rate": sample_rate}, dur, w.shape[-1])
+        
+        # 生成对应时长的静音张量
+        w = torch.zeros((1, chan, int(total_sec * sample_rate)))
+        
+        return ({"waveform": w, "sample_rate": sample_rate}, total_sec, total_frames)
