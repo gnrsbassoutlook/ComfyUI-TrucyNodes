@@ -13,9 +13,11 @@ from .trucy_toolkit import (
 )
 
 try:
-    from .trucy_video import TrucyVideoCombine
+    # 核心修改：增加了 TrucyLTXMSR 节点的导入
+    from .trucy_video import TrucyVideoCombine, TrucyLTXMSR
 except ImportError:
     TrucyVideoCombine = None
+    TrucyLTXMSR = None
 
 from .trucy_loop import (
     TrucyForLoopStart9ch, TrucyForLoopEnd9ch,
@@ -31,7 +33,7 @@ NODE_CLASS_MAPPINGS = {
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
     "TrucySymbolSniffer": TrucySymbolSniffer,
     "TrucyTextToNumber": TrucyTextToNumber,
-    "TrucyTextSlicerSmart": TrucyTextSlicerSmart, # 绝对保证注册！
+    "TrucyTextSlicerSmart": TrucyTextSlicerSmart,
     
     "TrucyExcelReader": TrucyExcelReader,
     "TrucyKleinEncode": TrucyKleinEncode,       
@@ -59,6 +61,8 @@ NODE_CLASS_MAPPINGS = {
 
 if TrucyVideoCombine:
     NODE_CLASS_MAPPINGS["TrucyVideoCombine"] = TrucyVideoCombine
+    # 核心修改：注册 TrucyLTXMSR 节点
+    NODE_CLASS_MAPPINGS["TrucyLTXMSR"] = TrucyLTXMSR
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAudioLoaderIndex": "🚀 Audio Loader by Index (Trucy)",
@@ -68,7 +72,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
     "TrucyTextToNumber": "🚀 Text to Number Converter (Trucy)",
-    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)", # 显示名
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)",
     "TrucyExcelReader": "🚀 Excel Cell Reader (Trucy)",
     "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
     "TrucyKleinEncode5": "🚀 Klein-Model Text Encode (5ch) (Trucy)",
@@ -86,8 +90,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyStringSlicer": "🚀 Trucy String Slicer",
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
+    # 核心修改：注册 TrucyLTXMSR 显示名
+    "TrucyLTXMSR": "🚀 Trucy LTX MSR (Video Prep)",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
     "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",
     "TrucyForLoopEnd2ch": "🚀 Trucy For Loop End (2ch)"
 }
+
+WEB_DIRECTORY = "./web"
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

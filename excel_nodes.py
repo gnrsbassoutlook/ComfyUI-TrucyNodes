@@ -1,7 +1,8 @@
 import os
 import openpyxl
+import csv
 import torch
-import re  # 导入正则表达式库用于提取数字
+import re
 
 class TrucyExcelReader:
     @classmethod
@@ -22,37 +23,77 @@ class TrucyExcelReader:
 
     @classmethod
     def IS_CHANGED(cls, excel_path, sheet_name, row, column):
-        # 【核心修改】：不再返回固定字符串，而是返回文件的最后修改时间！
-        # 这样只要你在外部用 Excel 保存了文件，ComfyUI 下次运行就会自动重新读取。
         clean_path = excel_path.strip().replace('"', '')
-        if os.path.exists(clean_path):
-            return os.path.getmtime(clean_path)
+        target_file = clean_path
+
+        # 如果输入的是文件夹，自动寻找第一个 xlsx/csv 文件
+        if os.path.isdir(clean_path):
+            valid_exts = ['.xlsx', '.csv'] # 彻底废弃老旧的 .xls
+            files = [f for f in os.listdir(clean_path) if any(f.lower().endswith(ext) for ext in valid_exts)]
+            if files:
+                files.sort()
+                target_file = os.path.join(clean_path, files[0])
+        
+        # 监测最终文件的修改时间
+        if os.path.isfile(target_file):
+            return os.path.getmtime(target_file)
         return float("NaN")
 
     def read_cell(self, excel_path, sheet_name, row, column):
-        # 1. 路径清洗
         clean_path = excel_path.strip().replace('"', '')
-        
-        if not os.path.exists(clean_path):
-            return (f"Error: File not found at {clean_path}", 0, 0.0)
+        target_file = clean_path
+
+        # --- 智能文件夹探测模式 ---
+        if os.path.isdir(clean_path):
+            valid_exts = ['.xlsx', '.csv']
+            files = [f for f in os.listdir(clean_path) if any(f.lower().endswith(ext) for ext in valid_exts)]
+            if files:
+                files.sort()
+                target_file = os.path.join(clean_path, files[0])
+                print(f"[TrucyNodes] Directory provided. Auto-selected file: {target_file}")
+            else:
+                return ("Error: No .xlsx or .csv files found in directory", 0, 0.0)
+
+        if not os.path.isfile(target_file):
+            return (f"Error: File not found at {target_file}", 0, 0.0)
+
+        ext = target_file.lower().split('.')[-1]
+        cell_value = None
 
         try:
-            # 2. 读取 Excel
-            workbook = openpyxl.load_workbook(clean_path, data_only=True, read_only=True)
-            if sheet_name not in workbook.sheetnames:
-                return (f"Error: Sheet '{sheet_name}' not found", 0, 0.0)
+            # --- 读取 CSV 逻辑 (无视 Sheet 名称) ---
+            if ext == 'csv':
+                # 兼容不同编码，优先使用 utf-8-sig 以去除可能存在的 BOM 头
+                with open(target_file, 'r', encoding='utf-8-sig', errors='replace') as f:
+                    reader = list(csv.reader(f))
+                    # 校验行数和列数是否越界 (Excel/CSV 用户习惯从 1 开始)
+                    if 1 <= row <= len(reader) and 1 <= column <= len(reader[row-1]):
+                        cell_value = reader[row-1][column-1]
+                    else:
+                        return ("Error: Row or Column out of range in CSV", 0, 0.0)
             
-            sheet = workbook[sheet_name]
-            cell_value = sheet.cell(row=row, column=column).value
-            workbook.close()
+            # --- 读取 Excel (.xlsx) 逻辑 (强校验 Sheet) ---
+            elif ext == 'xlsx':
+                workbook = openpyxl.load_workbook(target_file, data_only=True, read_only=True)
+                if sheet_name in workbook.sheetnames:
+                    sheet = workbook[sheet_name]
+                    cell_value = sheet.cell(row=row, column=column).value
+                else:
+                    return (f"Error: Sheet '{sheet_name}' not found", 0, 0.0)
+                workbook.close()
+            
+            # --- 拒绝老旧的 .xls ---
+            elif ext == 'xls':
+                return ("Error: Legacy .xls format is unsupported. Please save as .xlsx or .csv", 0, 0.0)
+            else:
+                return ("Error: Unsupported file format", 0, 0.0)
 
-            if cell_value is None:
+            # --- 空值处理 ---
+            if cell_value is None or str(cell_value).strip() == "":
                 return ("N/A", 0, 0.0)
 
-            # 3. 原始字符串处理
+            # --- 智能数字提取 ---
             full_str = str(cell_value)
-
-            # --- 4. 智能数字提取逻辑 ---
             number_match = re.search(r"[-+]?\d*\.\d+|[-+]?\d+", full_str)
 
             res_float = 0.0
@@ -76,5 +117,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyExcelReader": "Excel Cell Reader (Trucy)"
+    "TrucyExcelReader": "🚀 Excel Cell Reader (Trucy)"
 }

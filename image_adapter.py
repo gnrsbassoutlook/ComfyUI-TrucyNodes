@@ -5,14 +5,6 @@ import math
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import comfy.utils
 
-# 引入阻断器 (用于 disable_out)
-try:
-    from comfy_execution.graph import ExecutionBlocker
-except ImportError:
-    class ExecutionBlocker:
-        def __init__(self, value):
-            self.value = value
-
 # ========================================================
 # 1. 图像分辨率适配器
 # ========================================================
@@ -132,15 +124,14 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
 
 # ========================================================
-# 3. 🚀 纯图像无损直通桥接器 (精简版：仅保留 disable_out)
+# 3. 🚀 纯图像无损直通桥接器 (软阻断模式)
 # ========================================================
 class TrucyImageBridge5:
     @classmethod
     def INPUT_TYPES(cls):
         inputs = {"required": {}, "optional": {}}
         for i in range(1, 6):
-            # 删除了 disable_in，仅保留极具战术价值的 disable_out
-            inputs["required"][f"disable_out_{i}"] = ("BOOLEAN", {"default": False, "label_on": f"Out {i} OFF", "label_off": f"Out {i} ON"})
+            inputs["required"][f"pass_out_{i}"] = ("BOOLEAN", {"default": True, "label_on": f"Out {i} ON", "label_off": f"Out {i} OFF"})
             inputs["optional"][f"img{i}"] = ("IMAGE",)
         return inputs
 
@@ -152,12 +143,13 @@ class TrucyImageBridge5:
     def bridge(self, **kwargs):
         results = []
         for i in range(1, 6):
-            disable_out = kwargs.get(f"disable_out_{i}", False)
+            is_pass = kwargs.get(f"pass_out_{i}", True)
             img = kwargs.get(f"img{i}", None)
             
-            # 核心：利用 ExecutionBlocker 从源头切断下游的运行
-            if disable_out: 
-                results.append(ExecutionBlocker(None))
+            # 【核心修改】：如果设为 OFF（不通过），发送 None。
+            # 这会让下游节点（如 MSR）继续运行，并在其内部被智能过滤掉，完美实现选择性合帧！
+            if not is_pass: 
+                results.append(None)
             else: 
                 results.append(img)
                 
@@ -168,7 +160,7 @@ class TrucyImageBridge10:
     def INPUT_TYPES(cls):
         inputs = {"required": {}, "optional": {}}
         for i in range(1, 11):
-            inputs["required"][f"disable_out_{i}"] = ("BOOLEAN", {"default": False, "label_on": f"Out {i} OFF", "label_off": f"Out {i} ON"})
+            inputs["required"][f"pass_out_{i}"] = ("BOOLEAN", {"default": True, "label_on": f"Out {i} ON", "label_off": f"Out {i} OFF"})
             inputs["optional"][f"img{i}"] = ("IMAGE",)
         return inputs
 
@@ -180,11 +172,11 @@ class TrucyImageBridge10:
     def bridge(self, **kwargs):
         results = []
         for i in range(1, 11):
-            disable_out = kwargs.get(f"disable_out_{i}", False)
+            is_pass = kwargs.get(f"pass_out_{i}", True)
             img = kwargs.get(f"img{i}", None)
             
-            if disable_out: 
-                results.append(ExecutionBlocker(None))
+            if not is_pass: 
+                results.append(None)
             else: 
                 results.append(img)
                 
@@ -196,4 +188,12 @@ NODE_CLASS_MAPPINGS = {
     "TrucyAssetGrid10": TrucyAssetGrid10,
     "TrucyImageBridge5": TrucyImageBridge5,
     "TrucyImageBridge10": TrucyImageBridge10
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
+    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (5)",
+    "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
+    "TrucyImageBridge5": "🚀 Image Bridge (5ch) (Trucy)",
+    "TrucyImageBridge10": "🚀 Image Bridge (10ch) (Trucy)"
 }

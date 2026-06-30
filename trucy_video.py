@@ -8,17 +8,12 @@ import folder_paths
 import soundfile as sf
 from PIL import Image
 import random
+import cv2
 
+# ========================================================
+# 1. 🚀 翠西-视频合成 (TrucyVideoCombine) 
+# ========================================================
 class TrucyVideoCombine:
-    """
-    【🚀 翠西-视频合成】
-    功能：将图片序列编码为高清视频。
-    🚀 核心特性：
-    1. 零垃圾：内存直通 FFmpeg，不产生中间图片文件。
-    2. 比例修正：支持 Crop(裁切)/Stretch(拉伸)，解决 1088px 适配问题。
-    3. 音频混流：支持输入 Audio 节点，自动合成音视频。
-    """
-    
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -61,7 +56,6 @@ class TrucyVideoCombine:
         if ffmpeg_path is None:
             raise RuntimeError("Trucy Video Error: ffmpeg.exe not found!")
 
-        # 比例处理逻辑保持不变，仅更新内部变量名
         output_dir = folder_paths.get_output_directory()
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir, images[0].shape[1], images[0].shape[0])
         
@@ -103,5 +97,110 @@ class TrucyVideoCombine:
 
         return {"ui": {"text": [file_path]}, "result": (file_path,)}
 
-NODE_CLASS_MAPPINGS = {"TrucyVideoCombine": TrucyVideoCombine}
-NODE_DISPLAY_NAME_MAPPINGS = {"TrucyVideoCombine": "🚀 Trucy Video Combine | 翠西-视频合成"}
+
+# ========================================================
+# 2. 🚀 翠西 LTX 视频预处理 (Trucy LTX MSR)
+# ========================================================
+class TrucyLTXMSR:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "width": ("INT", {"default": 1280, "min": 32, "max": 8192, "step": 32}),
+                "height": ("INT", {"default": 720, "min": 32, "max": 8192, "step": 32}),
+                # 核心修改：增加了 49, 51, 57 等实验性长帧数选项
+                "frame_count": ([17, 25, 33, 41, 49, 51, 57], {"default": 41}),
+            },
+            "optional": {
+                "img1": ("IMAGE",),
+                "img2": ("IMAGE",),
+                "img3": ("IMAGE",),
+                "img4": ("IMAGE",),
+                "img5_bg": ("IMAGE",), 
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("video_frames",)
+    FUNCTION = "create_video_frames"
+    CATEGORY = "TrucyNodes/Video"
+
+    def _is_valid_image(self, img):
+        if img is None: return False
+        if type(img).__name__ == 'ExecutionBlocker': return False
+        if not isinstance(img, torch.Tensor): return False
+        return True
+
+    def _create_error_image(self, width, height):
+        img = Image.new('RGB', (width, height), color=(128, 0, 0))
+        draw = ImageDraw.Draw(img)
+        try: font = ImageFont.truetype("arial.ttf", max(40, width//15))
+        except: font = ImageFont.load_default()
+        draw.text((width//10, height//2), "MISSING ASSETS", fill=(255, 255, 255), font=font)
+        tensor = torch.from_numpy(np.array(img).astype(np.float32) / 255.0)[None,]
+        return tensor
+
+    def create_video_frames(self, width, height, frame_count, img5_bg=None, **kwargs):
+        images = []
+        
+        for name in ("img1", "img2", "img3", "img4"):
+            image = kwargs.get(name)
+            if self._is_valid_image(image):
+                images.append(self._prepare_image(image, (width, height)))
+
+        if self._is_valid_image(img5_bg):
+            images.append(self._prepare_image(img5_bg, (width, height)))
+
+        if not images:
+            print("[TrucyNodes] Warning: LTX MSR received 0 valid images. Generating placeholder to prevent crash.")
+            error_img = self._create_error_image(width, height)
+            images.append(self._prepare_image(error_img, (width, height)))
+
+        frames = self._expand_frames(images, frame_count)
+        output = torch.from_numpy(np.stack(frames).astype(np.float32) / 255.0)
+        
+        return (output,)
+
+    @staticmethod
+    def _tensor_to_rgb_array(image):
+        if isinstance(image, torch.Tensor):
+            if image.ndim == 4: image = image[0]
+            image = image.detach().cpu().numpy()
+
+        image = np.asarray(image)
+        if image.dtype != np.uint8:
+            image = np.clip(image * 255.0, 0, 255).astype(np.uint8)
+
+        if image.ndim == 2: image = np.stack([image, image, image], axis=-1)
+        elif image.shape[-1] == 4: image = image[..., :3]
+
+        return np.ascontiguousarray(image)
+
+    @staticmethod
+    def _prepare_image(image, target_size):
+        image_array = TrucyLTXMSR._tensor_to_rgb_array(image)
+        pil_image = Image.fromarray(image_array).convert("RGB")
+        image_array = np.array(pil_image)
+        if image_array.shape[1] == target_size[0] and image_array.shape[0] == target_size[1]:
+            return np.ascontiguousarray(image_array)
+        return cv2.resize(image_array, target_size, interpolation=cv2.INTER_LANCZOS4)
+
+    @staticmethod
+    def _expand_frames(images, frame_count):
+        base_count = frame_count // len(images)
+        remainder = frame_count % len(images)
+        frames = []
+        for index, image in enumerate(images):
+            repeats = base_count + (1 if index < remainder else 0)
+            frames.extend([image] * repeats)
+        return frames
+
+NODE_CLASS_MAPPINGS = {
+    "TrucyVideoCombine": TrucyVideoCombine,
+    "TrucyLTXMSR": TrucyLTXMSR
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "TrucyVideoCombine": "🚀 Trucy Video Combine",
+    "TrucyLTXMSR": "🚀 Trucy LTX MSR (Video Prep)"
+}

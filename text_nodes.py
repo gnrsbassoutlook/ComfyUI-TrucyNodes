@@ -1,6 +1,7 @@
 import os
 import re
 
+# --- 辅助函数：智能提取第一个数字 ---
 def extract_numbers(text):
     if not text or text.strip() == "":
         return 0, 0.0
@@ -32,13 +33,11 @@ class TrucyTxtBatchLoader:
     RETURN_NAMES = ("selected_content", "selected_filename", "merged_content", "merged_with_headers")
     FUNCTION = "load_texts"
     CATEGORY = "TrucyNodes/Text"
-
     @classmethod
     def IS_CHANGED(cls, directory_path, **kwargs):
         clean_path = directory_path.strip().replace('"', '')
         if os.path.isdir(clean_path): return os.path.getmtime(clean_path)
         return float("NaN")
-
     def load_texts(self, directory_path, index_mode, index, sort_by, skip_first, load_cap):
         clean_path = directory_path.strip().replace('"', '')
         if not os.path.isdir(clean_path): return ("Error: Directory not found", "N/A", "", "")
@@ -49,11 +48,9 @@ class TrucyTxtBatchLoader:
         files = files[skip_first:]
         if load_cap != -1: files = files[:load_cap]
         if not files: return ("Index out of range", "N/A", "", "")
-        
         actual_index = index if index_mode == "0-based (0,1,2...)" else index - 1
         all_contents, all_with_headers = [], []
         selected_content, selected_filename = "N/A", "OUT_OF_RANGE"
-        
         for i, filename in enumerate(files):
             file_path = os.path.join(clean_path, filename)
             pure_name = os.path.splitext(filename)[0]
@@ -68,7 +65,6 @@ class TrucyTxtBatchLoader:
             all_with_headers.append(f"{pure_name}\n{content}")
             if i == actual_index:
                 selected_content, selected_filename = content, pure_name
-
         merged_3 = "\n\n".join(all_contents)
         merged_4 = "\n\n".join(all_with_headers)
         return (selected_content, selected_filename, merged_3[:1000000], merged_4[:1000000])
@@ -90,7 +86,6 @@ class TrucyTxtPreviewAndSave:
     RETURN_NAMES = ("text",)
     FUNCTION = "process_text"
     CATEGORY = "TrucyNodes/Text"
-
     def process_text(self, text, save_to_file, directory_path, file_name, encoding):
         if save_to_file and text:
             clean_dir = directory_path.strip().replace('"', '')
@@ -132,7 +127,6 @@ class TrucySymbolSniffer:
     RETURN_NAMES = ("int_value", "string_value", "text_directout")
     FUNCTION = "sniff"
     CATEGORY = "TrucyNodes/Text"
-
     def sniff(self, text_input, index_base, **kwargs):
         slots = [kwargs.get(f"slot_{i}", "").strip() for i in range(1, 7)]
         seen = {}
@@ -153,59 +147,8 @@ class TrucySymbolSniffer:
         final_val = match_index + 1 if index_base.startswith("1") else match_index
         return (final_val, str(final_val), text_input)
 
-class Trucy_text_spilitter_5:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "text_input": ("STRING", {"forceInput": True}),
-                "delimiter": ("STRING", {"default": "#"}),
-            }
-        }
-    RETURN_TYPES = ("STRING",)*5 + ("INT",)*5 + ("FLOAT",)*5
-    RETURN_NAMES = tuple([f"Text_{i}" for i in range(1, 6)] + [f"Int_{i}" for i in range(1, 6)] + [f"Float_{i}" for i in range(1, 6)])
-    FUNCTION = "split"
-    CATEGORY = "TrucyNodes/Text"
-
-    def split(self, text_input, delimiter):
-        parts = text_input.split(delimiter) if text_input else []
-        s_out, i_out, f_out = [], [], []
-        for i in range(5):
-            seg = parts[i].strip() if i < len(parts) else ""
-            res_i, res_f = extract_numbers(seg)
-            s_out.append(seg)
-            i_out.append(res_i)
-            f_out.append(res_f)
-        return tuple(s_out + i_out + f_out)
-
-class Trucy_text_spilitter_10:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "text_input": ("STRING", {"forceInput": True}),
-                "delimiter": ("STRING", {"default": "#"}),
-            }
-        }
-    RETURN_TYPES = ("STRING",)*10 + ("INT",)*10 + ("FLOAT",)*10
-    RETURN_NAMES = tuple([f"Text_{i}" for i in range(1, 11)] + [f"Int_{i}" for i in range(1, 11)] + [f"Float_{i}" for i in range(1, 11)])
-    FUNCTION = "split"
-    CATEGORY = "TrucyNodes/Text"
-
-    def split(self, text_input, delimiter):
-        parts = text_input.split(delimiter) if text_input else []
-        s_out, i_out, f_out = [], [], []
-        for i in range(10):
-            seg = parts[i].strip() if i < len(parts) else ""
-            res_i, res_f = extract_numbers(seg)
-            s_out.append(seg)
-            i_out.append(res_i)
-            f_out.append(res_f)
-        return tuple(s_out + i_out + f_out)
-
 # ======================================================================
-# 5. 纯文字智能转换器 (TrucyTextToNumber)
-# 【修复点】：去掉了 forceInput: True，让它可以直接在节点上手打文字！
+# 🚀 更新节点: 纯文字智能转换器 (加入布尔逻辑输出)
 # ======================================================================
 class TrucyTextToNumber:
     @classmethod
@@ -215,18 +158,25 @@ class TrucyTextToNumber:
                 "text": ("STRING", {"default": "", "multiline": True}),
             }
         }
-    RETURN_TYPES = ("STRING", "INT", "FLOAT")
-    RETURN_NAMES = ("string", "int", "float")
+    
+    # 新增布尔输出端口
+    RETURN_TYPES = ("STRING", "INT", "FLOAT", "BOOLEAN")
+    RETURN_NAMES = ("string", "int", "float", "boolean")
     FUNCTION = "convert"
     CATEGORY = "TrucyNodes/Text"
 
     def convert(self, text):
         res_i, res_f = extract_numbers(text)
-        return (text, res_i, res_f)
+        
+        # 布尔运算逻辑：如果文本是 0, 0.0, 空值, 或者 false，则输出 False；否则输出 True。
+        clean_text = text.strip().lower()
+        if clean_text in ["0", "0.0", "", "none", "null", "false"]:
+            res_b = False
+        else:
+            res_b = True
+            
+        return (text, res_i, res_f, res_b)
 
-# ======================================================================
-# 6. 智能文本切割器 (TrucyTextSlicerSmart) - 【确认它在这里！】
-# ======================================================================
 class TrucyTextSlicerSmart:
     @classmethod
     def INPUT_TYPES(cls):
@@ -243,26 +193,19 @@ class TrucyTextSlicerSmart:
     RETURN_NAMES = ("string_value", "int_value", "float_value")
     FUNCTION = "slice_text"
     CATEGORY = "TrucyNodes/Text"
-
     def slice_text(self, text_input, left_delimiter, right_delimiter, match_index, include_delimiters):
-        if not text_input:
-            return ("", 0, 0.0)
-
+        if not text_input: return ("", 0, 0.0)
         if left_delimiter == "" and right_delimiter == "":
             res_int, res_float = extract_numbers(text_input)
             return (text_input.strip(), res_int, res_float)
-
         pos = 0
         start_pos = -1
-
         for _ in range(match_index):
             found = text_input.find(left_delimiter, pos)
             if found == -1: return ("OUT_OF_RANGE", 0, 0.0)
             start_pos = found
             pos = found + len(left_delimiter)
-
         content_start = start_pos + len(left_delimiter)
-
         if right_delimiter == "":
             inner_content = text_input[content_start:]
             string_output = text_input[start_pos:] if include_delimiters else inner_content
@@ -270,23 +213,25 @@ class TrucyTextSlicerSmart:
             end_pos = text_input.find(right_delimiter, content_start)
             if end_pos == -1: return ("OUT_OF_RANGE", 0, 0.0)
             inner_content = text_input[content_start:end_pos]
-            if include_delimiters:
-                string_output = text_input[start_pos : end_pos + len(right_delimiter)]
-            else:
-                string_output = inner_content
-
+            if include_delimiters: string_output = text_input[start_pos : end_pos + len(right_delimiter)]
+            else: string_output = inner_content
         cleaned_output = string_output.strip()
         cleaned_inner = inner_content.strip()
         res_int, res_float = extract_numbers(cleaned_inner)
-
         return (cleaned_output, res_int, res_float)
 
 NODE_CLASS_MAPPINGS = {
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
     "TrucySymbolSniffer": TrucySymbolSniffer,
-    "Trucy_text_spilitter_5": Trucy_text_spilitter_5,
-    "Trucy_text_spilitter_10": Trucy_text_spilitter_10,
     "TrucyTextToNumber": TrucyTextToNumber,
     "TrucyTextSlicerSmart": TrucyTextSlicerSmart  
+}
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
+    "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
+    "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
+    "TrucyTextToNumber": "🚀 Text to Number Converter (Trucy)",
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)"  
 }
