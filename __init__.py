@@ -1,6 +1,7 @@
 # --- ComfyUI-TrucyNodes 初始化文件 (Master Unified Version) ---
 
-from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator
+# 1. 基础模块导入
+from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio # 核心修改：新增 TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart
 from .excel_nodes import TrucyExcelReader
 from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
@@ -13,11 +14,9 @@ from .trucy_toolkit import (
 )
 
 try:
-    # 核心修改：增加了 TrucyLTXMSR 节点的导入
-    from .trucy_video import TrucyVideoCombine, TrucyLTXMSR
+    from .trucy_video import TrucyVideoCombine
 except ImportError:
     TrucyVideoCombine = None
-    TrucyLTXMSR = None
 
 from .trucy_loop import (
     TrucyForLoopStart9ch, TrucyForLoopEnd9ch,
@@ -25,9 +24,11 @@ from .trucy_loop import (
 )
 
 NODE_CLASS_MAPPINGS = {
+    # 音频工具组
     "TrucyAudioLoaderIndex": TrucyAudioLoaderIndex,
     "AudioLengthDetector": AudioLengthDetector,
     "EmptyAudioGenerator": EmptyAudioGenerator,
+    "TrucySaveAudio": TrucySaveAudio, # 核心修改：注册
     
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
@@ -61,13 +62,12 @@ NODE_CLASS_MAPPINGS = {
 
 if TrucyVideoCombine:
     NODE_CLASS_MAPPINGS["TrucyVideoCombine"] = TrucyVideoCombine
-    # 核心修改：注册 TrucyLTXMSR 节点
-    NODE_CLASS_MAPPINGS["TrucyLTXMSR"] = TrucyLTXMSR
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAudioLoaderIndex": "🚀 Audio Loader by Index (Trucy)",
     "AudioLengthDetector": "🚀 Audio Detector & Padder (Trucy)",
     "EmptyAudioGenerator": "🚀 Empty Audio Generator (Trucy)",
+    "TrucySaveAudio": "🚀 Save Audio (Trucy)", # 核心修改：显示名
     "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
@@ -90,8 +90,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyStringSlicer": "🚀 Trucy String Slicer",
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
-    # 核心修改：注册 TrucyLTXMSR 显示名
-    "TrucyLTXMSR": "🚀 Trucy LTX MSR (Video Prep)",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
     "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",

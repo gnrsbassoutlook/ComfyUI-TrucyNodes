@@ -147,3 +147,104 @@ class EmptyAudioGenerator:
         w = torch.zeros((1, chan, int(total_sec * sample_rate)))
         
         return ({"waveform": w, "sample_rate": sample_rate}, total_sec, total_frames)
+        
+# ======================================================================
+# 4. 音频保存器 (TrucySaveAudio)
+# 特性：支持多种格式导出，自带重采样和声道转换，支持绝对路径与默认路径智能切换
+# ======================================================================
+class TrucySaveAudio:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO", ),
+                "filename_prefix": ("STRING", {"default": "TrucyAudio"}),
+                "directory_path": ("STRING", {"default": ""}), # 留空则使用默认 output 目录
+                "format": (["mp3", "wav", "flac"], {"default": "mp3"}),
+                "target_sample_rate": ([48000, 44100, 32000, 24000, 16000], {"default": 48000}),
+                "channel_mode": (["Mono (单声道)", "Stereo (立体声)", "Keep Original (保持原样)"], {"default": "Mono (单声道)"}),
+                "mp3_bitrate": (["320k", "256k", "192k", "128k"], {"default": "320k"}),
+            }
+        }
+    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("saved_path",)
+    FUNCTION = "save_audio"
+    CATEGORY = "TrucyNodes/Audio"
+    OUTPUT_NODE = True
+
+    def save_audio(self, audio, filename_prefix, directory_path, format, target_sample_rate, channel_mode, mp3_bitrate):
+        import folder_paths
+        
+        waveform = audio["waveform"] # [Batch, Channels, Samples]
+        sr = audio["sample_rate"]
+        
+        # 1. 决定保存目录
+        clean_dir = directory_path.strip().replace('"', '')
+        if clean_dir == "":
+            output_dir = folder_paths.get_output_directory()
+        else:
+            try:
+                os.makedirs(clean_dir, exist_ok=True)
+                output_dir = clean_dir
+            except Exception as e:
+                print(f"[TrucyNodes] Invalid directory_path. Falling back to default output. Error: {e}")
+                output_dir = folder_paths.get_output_directory()
+
+        # 2. 获取防重名路径
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
+        final_filename = f"{filename}_{counter:05}.{format}"
+        save_path = os.path.join(full_output_folder, final_filename)
+
+        # 3. 处理音频数据 (取第一段音频)
+        if waveform.dim() == 3:
+            w = waveform[0] # [Channels, Samples]
+        else:
+            w = waveform
+            
+        # 4. 采样率转换
+        if sr != target_sample_rate:
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
+            w = resampler(w)
+            sr = target_sample_rate
+
+        # 5. 声道转换
+        channels = w.shape[0]
+        if channel_mode == "Mono (单声道)" and channels > 1:
+            w = torch.mean(w, dim=0, keepdim=True)
+        elif channel_mode == "Stereo (立体声)" and channels == 1:
+            w = w.repeat(2, 1)
+
+        # 6. 保存文件
+        # w 的形状需要转为 [Samples, Channels] 给 soundfile/pydub 使用
+        w_np = w.T.cpu().numpy()
+
+        try:
+            if format in ["wav", "flac"]:
+                import soundfile as sf
+                sf.write(save_path, w_np, sr, format=format.upper())
+            elif format == "mp3":
+                # mp3 压缩需要使用 pydub (依赖 ffmpeg)
+                # 先转存为临时 wav，再用 pydub 压缩
+                import soundfile as sf
+                from pydub import AudioSegment
+                
+                temp_wav = save_path.replace(".mp3", "_temp.wav")
+                sf.write(temp_wav, w_np, sr, format="WAV")
+                
+                audio_segment = AudioSegment.from_wav(temp_wav)
+                audio_segment.export(save_path, format="mp3", bitrate=mp3_bitrate)
+                
+                # 清理临时文件
+                if os.path.exists(temp_wav):
+                    os.remove(temp_wav)
+                    
+            print(f"[TrucyNodes] Successfully saved audio to: {save_path}")
+            
+            # 返回前端预览所需信息
+            return {"ui": {"text": [save_path]}, "result": (save_path,)}
+            
+        except Exception as e:
+            error_msg = f"Failed to save audio: {str(e)}"
+            print(f"[TrucyNodes] Error: {error_msg}")
+            return {"ui": {"text": [error_msg]}, "result": (error_msg,)}
