@@ -149,8 +149,7 @@ class EmptyAudioGenerator:
         return ({"waveform": w, "sample_rate": sample_rate}, total_sec, total_frames)
         
 # ======================================================================
-# 4. 音频保存器 (TrucySaveAudio)
-# 特性：支持多种格式导出，自带重采样和声道转换，支持绝对路径与默认路径智能切换
+# 4. 音频保存器 (TrucySaveAudio) - 终极包边版
 # ======================================================================
 class TrucySaveAudio:
     @classmethod
@@ -159,11 +158,16 @@ class TrucySaveAudio:
             "required": {
                 "audio": ("AUDIO", ),
                 "filename_prefix": ("STRING", {"default": "TrucyAudio"}),
-                "directory_path": ("STRING", {"default": ""}), # 留空则使用默认 output 目录
+                "directory_path": ("STRING", {"default": ""}), 
                 "format": (["mp3", "wav", "flac"], {"default": "mp3"}),
                 "target_sample_rate": ([48000, 44100, 32000, 24000, 16000], {"default": 48000}),
                 "channel_mode": (["Mono (单声道)", "Stereo (立体声)", "Keep Original (保持原样)"], {"default": "Mono (单声道)"}),
                 "mp3_bitrate": (["320k", "256k", "192k", "128k"], {"default": "320k"}),
+                # 新增：前置与后置垫音开关
+                "pre_pad": ("BOOLEAN", {"default": False, "label_on": "PRE-ON (前置)", "label_off": "OFF"}),
+                "pre_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "500ms"}),
+                "post_pad": ("BOOLEAN", {"default": False, "label_on": "POST-ON (后置)", "label_off": "OFF"}),
+                "post_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "500ms"}),
             }
         }
     
@@ -173,7 +177,7 @@ class TrucySaveAudio:
     CATEGORY = "TrucyNodes/Audio"
     OUTPUT_NODE = True
 
-    def save_audio(self, audio, filename_prefix, directory_path, format, target_sample_rate, channel_mode, mp3_bitrate):
+    def save_audio(self, audio, filename_prefix, directory_path, format, target_sample_rate, channel_mode, mp3_bitrate, pre_pad, pre_ms, post_pad, post_ms):
         import folder_paths
         
         waveform = audio["waveform"] # [Batch, Channels, Samples]
@@ -196,7 +200,7 @@ class TrucySaveAudio:
         final_filename = f"{filename}_{counter:05}.{format}"
         save_path = os.path.join(full_output_folder, final_filename)
 
-        # 3. 处理音频数据 (取第一段音频)
+        # 3. 提取核心张量
         if waveform.dim() == 3:
             w = waveform[0] # [Channels, Samples]
         else:
@@ -215,17 +219,27 @@ class TrucySaveAudio:
         elif channel_mode == "Stereo (立体声)" and channels == 1:
             w = w.repeat(2, 1)
 
-        # 6. 保存文件
-        # w 的形状需要转为 [Samples, Channels] 给 soundfile/pydub 使用
-        w_np = w.T.cpu().numpy()
+        # --- 6. 核心追加：导出前物理垫音 ---
+        if pre_pad:
+            pad_s = int(pre_ms.replace("ms", "")) / 1000.0
+            pad_samples = int(pad_s * sr)
+            # 在 Samples 维度 (dim=-1) 的前面填充
+            w = F.pad(w, (pad_samples, 0), "constant", 0)
+            
+        if post_pad:
+            pad_s = int(post_ms.replace("ms", "")) / 1000.0
+            pad_samples = int(pad_s * sr)
+            # 在 Samples 维度 (dim=-1) 的后面填充
+            w = F.pad(w, (0, pad_samples), "constant", 0)
+
+        # 7. 转换形状并保存
+        w_np = w.T.cpu().numpy() # 转为 [Samples, Channels] 供 sf 写入
 
         try:
             if format in ["wav", "flac"]:
                 import soundfile as sf
                 sf.write(save_path, w_np, sr, format=format.upper())
             elif format == "mp3":
-                # mp3 压缩需要使用 pydub (依赖 ffmpeg)
-                # 先转存为临时 wav，再用 pydub 压缩
                 import soundfile as sf
                 from pydub import AudioSegment
                 
@@ -235,13 +249,10 @@ class TrucySaveAudio:
                 audio_segment = AudioSegment.from_wav(temp_wav)
                 audio_segment.export(save_path, format="mp3", bitrate=mp3_bitrate)
                 
-                # 清理临时文件
                 if os.path.exists(temp_wav):
                     os.remove(temp_wav)
                     
             print(f"[TrucyNodes] Successfully saved audio to: {save_path}")
-            
-            # 返回前端预览所需信息
             return {"ui": {"text": [save_path]}, "result": (save_path,)}
             
         except Exception as e:
