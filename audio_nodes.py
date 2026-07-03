@@ -5,7 +5,7 @@ import torchaudio
 import torch.nn.functional as F
 
 # ======================================================================
-# 1. 智能索引音频加载器 (TrucyAudioLoaderIndex)
+# 1. 智能索引音频加载器
 # ======================================================================
 class TrucyAudioLoaderIndex:
     @classmethod
@@ -16,7 +16,7 @@ class TrucyAudioLoaderIndex:
                 "index_mode": (["0-based (0,1,2...)", "1-based (1,2,3...)"], {"default": "0-based (0,1,2...)"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 999999}),
                 "sort_by": (["Alphabetical (A-Z)", "Creation Time (Oldest First)"], {"default": "Alphabetical (A-Z)"}),
-                "target_sample_rate": ([44100, 48000, 16000, 22050, 24000, 8000], {"default": 48000}), # 统一默认48k
+                "target_sample_rate": ([44100, 48000, 16000, 22050, 24000, 8000], {"default": 48000}),
                 "skip_first": ("INT", {"default": 0, "min": 0, "max": 9999}),
                 "load_cap": ("INT", {"default": -1, "min": -1, "max": 9999}),
             }
@@ -53,7 +53,7 @@ class TrucyAudioLoaderIndex:
         return ({"waveform": waveform.unsqueeze(0), "sample_rate": target_sample_rate}, os.path.splitext(files[idx])[0])
 
 # ======================================================================
-# 2. 音频检测转换网关 (AudioLengthDetector)
+# 2. 音频检测转换网关
 # ======================================================================
 class AudioLengthDetector:
     @classmethod
@@ -61,8 +61,8 @@ class AudioLengthDetector:
         return {
             "required": {
                 "audio": ("AUDIO", ),
-                "fps": ("INT", {"default": 25, "min": 1, "max": 120}), # 默认改为25fps
-                "target_sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}), # 默认改为48k
+                "fps": ("INT", {"default": 25, "min": 1, "max": 120}),
+                "target_sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}),
                 "channel_mode": (["Stereo (立体声)", "Mono (单声道)"], {"default": "Stereo (立体声)"}),
                 "pre_pad": ("BOOLEAN", {"default": False, "label_on": "PRE-ON", "label_off": "OFF"}),
                 "pre_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "500ms"}),
@@ -70,7 +70,6 @@ class AudioLengthDetector:
                 "post_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "250ms"}),
             }
         }
-    # 统一命名为 total_sec
     RETURN_TYPES, RETURN_NAMES = ("AUDIO", "FLOAT", "INT"), ("audio", "total_sec", "total_frames")
     FUNCTION, CATEGORY, OUTPUT_NODE = "process", "TrucyNodes/Audio", True
 
@@ -78,25 +77,21 @@ class AudioLengthDetector:
         w = audio["waveform"] 
         sr = audio["sample_rate"]
         
-        # 1. 采样率转换
         if sr != target_sample_rate:
             resampler = torchaudio.transforms.Resample(sr, target_sample_rate)
             w = resampler(w.squeeze(0)).unsqueeze(0)
             sr = target_sample_rate
 
-        # 2. 声道转换
         channels = w.shape[1]
         if channel_mode == "Mono (单声道)" and channels > 1:
             w = torch.mean(w, dim=1, keepdim=True)
         elif channel_mode == "Stereo (立体声)" and channels == 1:
             w = w.repeat(1, 2, 1)
 
-        # 3. 前置垫音
         if pre_pad:
             pad_s = int(pre_ms.replace("ms", "")) / 1000.0
             w = F.pad(w, (int(pad_s * sr), 0), "constant", 0)
         
-        # 4. 后置补齐
         if post_pad:
             step = int(post_ms.replace("ms", "")) / 1000.0
             cur_s = w.shape[-1] / sr
@@ -110,7 +105,7 @@ class AudioLengthDetector:
         return {"ui": {"text": [txt]}, "result": ({"waveform": w, "sample_rate": sr}, final_s, frames)}
 
 # ======================================================================
-# 3. 静音生成 (EmptyAudioGenerator)
+# 3. 静音生成器
 # ======================================================================
 class EmptyAudioGenerator:
     @classmethod
@@ -119,21 +114,15 @@ class EmptyAudioGenerator:
             "required": {
                 "mode": (["Seconds", "Frames"], {"default": "Seconds"}),
                 "seconds": ("FLOAT", {"default": 1.0, "min": 0.0, "step": 0.001}),
-                "frames": ("INT", {"default": 25, "min": 0}), # 默认改为25帧
-                "fps": ("INT", {"default": 25, "min": 1}),    # 默认改为25fps
-                "sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}), # 默认48k
+                "frames": ("INT", {"default": 25, "min": 0}),
+                "fps": ("INT", {"default": 25, "min": 1}),
+                "sample_rate": ([44100, 48000, 32000, 24000, 22050, 16000], {"default": 48000}),
                 "channels": (["Stereo", "Mono"], {"default": "Stereo"}),
             }
         }
-    
-    # 核心修改：将 total_samples 改为 total_frames，并统一时长命名为 total_sec
-    RETURN_TYPES = ("AUDIO", "FLOAT", "INT")
-    RETURN_NAMES = ("audio", "total_sec", "total_frames")
-    FUNCTION = "gen"
-    CATEGORY = "TrucyNodes/Audio"
+    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("AUDIO", "FLOAT", "INT"), ("audio", "total_sec", "total_frames"), "gen", "TrucyNodes/Audio"
     
     def gen(self, mode, seconds, frames, fps, sample_rate, channels):
-        # 统一计算总秒数
         if mode == "Frames":
             total_sec = frames / fps
             total_frames = frames
@@ -142,15 +131,21 @@ class EmptyAudioGenerator:
             total_frames = round(seconds * fps)
             
         chan = 2 if channels == "Stereo" else 1
-        
-        # 生成对应时长的静音张量
         w = torch.zeros((1, chan, int(total_sec * sample_rate)))
-        
         return ({"waveform": w, "sample_rate": sample_rate}, total_sec, total_frames)
-        
+
 # ======================================================================
-# 4. 音频保存器 (TrucySaveAudio) - 终极无依赖版
+# 4. 音频保存器 (带环境依赖硬隔离机制)
 # ======================================================================
+# --- 安全隔离：尝试导入第三方库，如果失败则禁用该节点，但不影响整个文件 ---
+try:
+    import soundfile as sf
+    import subprocess
+    HAS_SOUNDFILE = True
+except ImportError:
+    HAS_SOUNDFILE = False
+    print("\n[TrucyNodes] ⚠️ WARNING: 'soundfile' library is missing! TrucySaveAudio node will be disabled. Run 'pip install soundfile' to fix this.\n")
+
 class TrucySaveAudio:
     @classmethod
     def INPUT_TYPES(cls):
@@ -176,7 +171,6 @@ class TrucySaveAudio:
     CATEGORY = "TrucyNodes/Audio"
     OUTPUT_NODE = True
 
-    # 引入我们最稳健的 FFmpeg 寻址逻辑
     def get_ffmpeg_path(self):
         import shutil
         ffmpeg_path = shutil.which("ffmpeg")
@@ -196,13 +190,14 @@ class TrucySaveAudio:
         return None
 
     def save_audio(self, audio, filename_prefix, directory_path, format, target_sample_rate, channel_mode, mp3_bitrate, pre_pad, pre_ms, post_pad, post_ms):
+        if not HAS_SOUNDFILE:
+            return {"ui": {"text": ["Error: Missing 'soundfile' library."]}, "result": ("Error",)}
+            
         import folder_paths
-        import subprocess
         
         waveform = audio["waveform"]
         sr = audio["sample_rate"]
         
-        # 1. 决定保存目录
         clean_dir = directory_path.strip().replace('"', '')
         if clean_dir == "":
             output_dir = folder_paths.get_output_directory()
@@ -211,10 +206,8 @@ class TrucySaveAudio:
                 os.makedirs(clean_dir, exist_ok=True)
                 output_dir = clean_dir
             except Exception as e:
-                print(f"[TrucyNodes] Invalid directory. Falling back to default. Error: {e}")
                 output_dir = folder_paths.get_output_directory()
 
-        # 2. 获取防重名路径
         full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, output_dir)
         final_filename = f"{filename}_{counter:05}.{format}"
         save_path = os.path.join(full_output_folder, final_filename)
@@ -243,11 +236,9 @@ class TrucySaveAudio:
         w_np = w.T.cpu().numpy()
 
         try:
-            import soundfile as sf
             if format in ["wav", "flac"]:
                 sf.write(save_path, w_np, sr, format=format.upper())
             elif format == "mp3":
-                # --- 核心修复：直接使用系统底层的 FFmpeg 进行纯正转码 ---
                 temp_wav = save_path.replace(".mp3", "_temp.wav")
                 sf.write(temp_wav, w_np, sr, format="WAV")
                 
@@ -257,7 +248,7 @@ class TrucySaveAudio:
 
                 cmd = [
                     ffmpeg_path, 
-                    "-y", # 覆盖存在的文件
+                    "-y", 
                     "-i", temp_wav, 
                     "-c:a", "libmp3lame", 
                     "-b:a", mp3_bitrate, 
@@ -271,7 +262,6 @@ class TrucySaveAudio:
                     
                 subprocess.run(cmd, startupinfo=startupinfo, check=True)
                 
-                # 成功后清理临时文件
                 if os.path.exists(temp_wav):
                     os.remove(temp_wav)
                     
@@ -280,5 +270,4 @@ class TrucySaveAudio:
             
         except Exception as e:
             error_msg = f"Failed to save audio: {str(e)}"
-            print(f"[TrucyNodes] Error: {error_msg}")
             return {"ui": {"text": [error_msg]}, "result": (error_msg,)}

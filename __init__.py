@@ -1,7 +1,6 @@
 # --- ComfyUI-TrucyNodes 初始化文件 (Master Unified Version) ---
 
-# 1. 基础模块导入
-from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio # 核心修改：新增 TrucySaveAudio
+from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart
 from .excel_nodes import TrucyExcelReader
 from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
@@ -14,21 +13,32 @@ from .trucy_toolkit import (
 )
 
 try:
-    from .trucy_video import TrucyVideoCombine
-except ImportError:
+    from .trucy_video import TrucyVideoCombine, TrucyLTXMSR
+except ImportError as e:
+    # 打印详细错误方便排查
+    print(f"\n[TrucyNodes] ❌ 导入 trucy_video.py 失败！错误信息: {e}")
+    import traceback
+    traceback.print_exc()
+    print("[TrucyNodes] --------------------------------------------------\n")
     TrucyVideoCombine = None
+    TrucyLTXMSR = None
 
 from .trucy_loop import (
     TrucyForLoopStart9ch, TrucyForLoopEnd9ch,
     TrucyForLoopStart2ch, TrucyForLoopEnd2ch
 )
 
+# 【核心修改】：通过 try...except 尝试安全导入 TrucySaveAudio
+try:
+    from .audio_nodes import TrucySaveAudio
+except ImportError:
+    TrucySaveAudio = None
+
+
 NODE_CLASS_MAPPINGS = {
-    # 音频工具组
     "TrucyAudioLoaderIndex": TrucyAudioLoaderIndex,
     "AudioLengthDetector": AudioLengthDetector,
     "EmptyAudioGenerator": EmptyAudioGenerator,
-    "TrucySaveAudio": TrucySaveAudio, # 核心修改：注册
     
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
@@ -62,12 +72,17 @@ NODE_CLASS_MAPPINGS = {
 
 if TrucyVideoCombine:
     NODE_CLASS_MAPPINGS["TrucyVideoCombine"] = TrucyVideoCombine
+    NODE_CLASS_MAPPINGS["TrucyLTXMSR"] = TrucyLTXMSR
+
+# 【核心修改】：如果成功导入了 TrucySaveAudio，才注册它
+if TrucySaveAudio:
+    NODE_CLASS_MAPPINGS["TrucySaveAudio"] = TrucySaveAudio
+
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAudioLoaderIndex": "🚀 Audio Loader by Index (Trucy)",
     "AudioLengthDetector": "🚀 Audio Detector & Padder (Trucy)",
     "EmptyAudioGenerator": "🚀 Empty Audio Generator (Trucy)",
-    "TrucySaveAudio": "🚀 Save Audio (Trucy)", # 核心修改：显示名
     "TrucyTxtBatchLoader": "🚀 TXT Loader by Index (Trucy)",
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
@@ -90,11 +105,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyStringSlicer": "🚀 Trucy String Slicer",
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
+    "TrucyLTXMSR": "🚀 Trucy LTX MSR (Video Prep)", 
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
     "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",
     "TrucyForLoopEnd2ch": "🚀 Trucy For Loop End (2ch)"
 }
+
+if TrucySaveAudio:
+    NODE_DISPLAY_NAME_MAPPINGS["TrucySaveAudio"] = "🚀 Save Audio (Trucy)"
 
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
