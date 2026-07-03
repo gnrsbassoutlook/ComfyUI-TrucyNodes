@@ -149,7 +149,7 @@ class EmptyAudioGenerator:
         return ({"waveform": w, "sample_rate": sample_rate}, total_sec, total_frames)
         
 # ======================================================================
-# 4. 音频保存器 (TrucySaveAudio) - 终极包边版
+# 4. 音频保存器 (TrucySaveAudio) - 终极无依赖版
 # ======================================================================
 class TrucySaveAudio:
     @classmethod
@@ -163,7 +163,6 @@ class TrucySaveAudio:
                 "target_sample_rate": ([48000, 44100, 32000, 24000, 16000], {"default": 48000}),
                 "channel_mode": (["Mono (单声道)", "Stereo (立体声)", "Keep Original (保持原样)"], {"default": "Mono (单声道)"}),
                 "mp3_bitrate": (["320k", "256k", "192k", "128k"], {"default": "320k"}),
-                # 新增：前置与后置垫音开关
                 "pre_pad": ("BOOLEAN", {"default": False, "label_on": "PRE-ON (前置)", "label_off": "OFF"}),
                 "pre_ms": (["250ms", "500ms", "750ms", "1000ms"], {"default": "500ms"}),
                 "post_pad": ("BOOLEAN", {"default": False, "label_on": "POST-ON (后置)", "label_off": "OFF"}),
@@ -177,10 +176,30 @@ class TrucySaveAudio:
     CATEGORY = "TrucyNodes/Audio"
     OUTPUT_NODE = True
 
+    # 引入我们最稳健的 FFmpeg 寻址逻辑
+    def get_ffmpeg_path(self):
+        import shutil
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path: return ffmpeg_path
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        possible_paths = [
+            os.path.join(base_path, "ffmpeg/bin/ffmpeg.exe"),
+            os.path.join(base_path, "ffmpeg/ffmpeg-exe/bin/ffmpeg.exe"),
+            os.path.join(base_path, "venv/Scripts/ffmpeg.exe"),
+        ]
+        for path in possible_paths:
+            if os.path.exists(path): return path
+        try:
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except: pass
+        return None
+
     def save_audio(self, audio, filename_prefix, directory_path, format, target_sample_rate, channel_mode, mp3_bitrate, pre_pad, pre_ms, post_pad, post_ms):
         import folder_paths
+        import subprocess
         
-        waveform = audio["waveform"] # [Batch, Channels, Samples]
+        waveform = audio["waveform"]
         sr = audio["sample_rate"]
         
         # 1. 决定保存目录
@@ -192,7 +211,7 @@ class TrucySaveAudio:
                 os.makedirs(clean_dir, exist_ok=True)
                 output_dir = clean_dir
             except Exception as e:
-                print(f"[TrucyNodes] Invalid directory_path. Falling back to default output. Error: {e}")
+                print(f"[TrucyNodes] Invalid directory. Falling back to default. Error: {e}")
                 output_dir = folder_paths.get_output_directory()
 
         # 2. 获取防重名路径
@@ -200,55 +219,59 @@ class TrucySaveAudio:
         final_filename = f"{filename}_{counter:05}.{format}"
         save_path = os.path.join(full_output_folder, final_filename)
 
-        # 3. 提取核心张量
-        if waveform.dim() == 3:
-            w = waveform[0] # [Channels, Samples]
-        else:
-            w = waveform
+        if waveform.dim() == 3: w = waveform[0]
+        else: w = waveform
             
-        # 4. 采样率转换
         if sr != target_sample_rate:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
             w = resampler(w)
             sr = target_sample_rate
 
-        # 5. 声道转换
         channels = w.shape[0]
         if channel_mode == "Mono (单声道)" and channels > 1:
             w = torch.mean(w, dim=0, keepdim=True)
         elif channel_mode == "Stereo (立体声)" and channels == 1:
             w = w.repeat(2, 1)
 
-        # --- 6. 核心追加：导出前物理垫音 ---
         if pre_pad:
             pad_s = int(pre_ms.replace("ms", "")) / 1000.0
-            pad_samples = int(pad_s * sr)
-            # 在 Samples 维度 (dim=-1) 的前面填充
-            w = F.pad(w, (pad_samples, 0), "constant", 0)
-            
+            w = F.pad(w, (int(pad_s * sr), 0), "constant", 0)
         if post_pad:
             pad_s = int(post_ms.replace("ms", "")) / 1000.0
-            pad_samples = int(pad_s * sr)
-            # 在 Samples 维度 (dim=-1) 的后面填充
-            w = F.pad(w, (0, pad_samples), "constant", 0)
+            w = F.pad(w, (0, int(pad_s * sr)), "constant", 0)
 
-        # 7. 转换形状并保存
-        w_np = w.T.cpu().numpy() # 转为 [Samples, Channels] 供 sf 写入
+        w_np = w.T.cpu().numpy()
 
         try:
+            import soundfile as sf
             if format in ["wav", "flac"]:
-                import soundfile as sf
                 sf.write(save_path, w_np, sr, format=format.upper())
             elif format == "mp3":
-                import soundfile as sf
-                from pydub import AudioSegment
-                
+                # --- 核心修复：直接使用系统底层的 FFmpeg 进行纯正转码 ---
                 temp_wav = save_path.replace(".mp3", "_temp.wav")
                 sf.write(temp_wav, w_np, sr, format="WAV")
                 
-                audio_segment = AudioSegment.from_wav(temp_wav)
-                audio_segment.export(save_path, format="mp3", bitrate=mp3_bitrate)
+                ffmpeg_path = self.get_ffmpeg_path()
+                if not ffmpeg_path:
+                    raise RuntimeError("FFmpeg not found! Cannot convert to MP3.")
+
+                cmd = [
+                    ffmpeg_path, 
+                    "-y", # 覆盖存在的文件
+                    "-i", temp_wav, 
+                    "-c:a", "libmp3lame", 
+                    "-b:a", mp3_bitrate, 
+                    save_path
+                ]
                 
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    
+                subprocess.run(cmd, startupinfo=startupinfo, check=True)
+                
+                # 成功后清理临时文件
                 if os.path.exists(temp_wav):
                     os.remove(temp_wav)
                     
