@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import numpy as np
 import folder_paths
 import soundfile as sf
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import random
 import cv2
 
@@ -108,15 +108,17 @@ class TrucyLTXMSR:
             "required": {
                 "width": ("INT", {"default": 1280, "min": 32, "max": 8192, "step": 32}),
                 "height": ("INT", {"default": 720, "min": 32, "max": 8192, "step": 32}),
-                # 核心修改：增加了 49, 51, 57 等实验性长帧数选项
                 "frame_count": ([17, 25, 33, 41, 49, 51, 57], {"default": 41}),
+                # --- 新增核心功能：背景选择器 ---
+                "bg_target": (["None"] + [f"img{i}" for i in range(1, 6)], {"default": "img5"}),
             },
             "optional": {
+                # 统一接口命名
                 "img1": ("IMAGE",),
                 "img2": ("IMAGE",),
                 "img3": ("IMAGE",),
                 "img4": ("IMAGE",),
-                "img5_bg": ("IMAGE",), 
+                "img5": ("IMAGE",), 
             },
         }
 
@@ -140,23 +142,36 @@ class TrucyLTXMSR:
         tensor = torch.from_numpy(np.array(img).astype(np.float32) / 255.0)[None,]
         return tensor
 
-    def create_video_frames(self, width, height, frame_count, img5_bg=None, **kwargs):
-        images = []
+    def create_video_frames(self, width, height, frame_count, bg_target, **kwargs):
+        regular_images = []
+        background_image = None
         
-        for name in ("img1", "img2", "img3", "img4"):
-            image = kwargs.get(name)
+        # 1. 遍历收集所有传入的图片
+        for i in range(1, 6):
+            slot_name = f"img{i}"
+            image = kwargs.get(slot_name)
+            
             if self._is_valid_image(image):
-                images.append(self._prepare_image(image, (width, height)))
+                prepared_img = self._prepare_image(image, (width, height))
+                # 智能分流：如果是被指定的背景图，单独存起来；否则放进普通队伍
+                if slot_name == bg_target:
+                    background_image = prepared_img
+                else:
+                    regular_images.append(prepared_img)
 
-        if self._is_valid_image(img5_bg):
-            images.append(self._prepare_image(img5_bg, (width, height)))
+        # 2. 队列组装：先把所有普通资产图排好序，最后把背景图压底！
+        images_to_process = regular_images
+        if background_image is not None:
+            images_to_process.append(background_image)
 
-        if not images:
+        # 3. 终极兜底
+        if not images_to_process:
             print("[TrucyNodes] Warning: LTX MSR received 0 valid images. Generating placeholder to prevent crash.")
             error_img = self._create_error_image(width, height)
-            images.append(self._prepare_image(error_img, (width, height)))
+            images_to_process.append(self._prepare_image(error_img, (width, height)))
 
-        frames = self._expand_frames(images, frame_count)
+        # 4. 原味展开
+        frames = self._expand_frames(images_to_process, frame_count)
         output = torch.from_numpy(np.stack(frames).astype(np.float32) / 255.0)
         
         return (output,)
