@@ -10,6 +10,15 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
+### [2026-07-03] Production-Grade Pipeline Integration: Performance & Stability
+🎬 Cinematic Video Loader (TrucyVideoLoaderIndex): Added a professional proxy media pipeline.
+Resolution/FPS Proxying: Added dynamic downsampling and frame skipping (e.g., 4/8/12 FPS) to drastically reduce VRAM usage during audio-visual conditioning.
+Intelligent Fallback: Implemented "Out-of-Bounds" protection—if an index is invalid, the node safely generates a 1kHz beep tone instead of crashing.
+🚀 Trucy LTX MSR Prep: Added background-target selection logic, allowing seamless swapping of composition foundations without breaking the LTX IC LoRA alignment.
+🛠️ Production Robustness: Integrated ExecutionBlocker across all bridge nodes to safely halt downstream execution, saving compute during debugging.
+🏗️ Architecture Consolidation: Completed the final unification of the TrucyNodes namespace, cleaning up all obsolete Matrix references.
+
+
 ### [2026-06-26] The "Director's Cut" Update: Precision & Performance
 🛡️ New Feature: Trucy Image Bridge (5ch/10ch): Introduced a lossless image passthrough node designed to clean up complex workspaces.
 Zero Overhead: Uses pure Python pointer pass-through. Consumes 0 MB of VRAM/RAM.

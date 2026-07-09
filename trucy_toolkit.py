@@ -9,45 +9,37 @@ from PIL.PngImagePlugin import PngInfo
 import folder_paths
 
 # ========================================================
-# 核心基础工具函数 (纯本地计算，无 VRAM 负担)
+# 核心工具函数
 # ========================================================
 def extract_numbers(text):
-    if not text or text.strip() == "":
-        return 0, 0.0
-    # 正则提取第一个整数或浮点数
+    if not text or text.strip() == "": return 0, 0.0
     match = re.search(r"[-+]?\d*\.\d+|[-+]?\d+", text)
     if match:
         num_str = match.group()
         try:
-            res_f = float(num_str)
-            res_i = int(res_f)
-            return res_i, res_f
-        except:
-            return 0, 0.0
+            f = float(num_str)
+            return int(f), f
+        except: return 0, 0.0
     return 0, 0.0
 
 def create_placeholder(style):
-    if style == "White": return torch.ones((1, 512, 512, 3), dtype=torch.float32)
-    else: return torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+    return torch.ones((1, 512, 512, 3)) if style == "White" else torch.zeros((1, 512, 512, 3))
 
-def create_error_image(text_content):
-    img = Image.new('RGB', (512, 512), color=(128, 128, 128))
-    draw = ImageDraw.Draw(img)
+def create_error_image(txt):
+    img = Image.new('RGB', (512, 512), (128, 128, 128))
     try: font = ImageFont.truetype("arial.ttf", 40)
     except: font = ImageFont.load_default()
-    draw.text((20, 200), f"MISSING:\n{text_content}", fill=(255, 0, 0), font=font)
+    ImageDraw.Draw(img).text((20, 200), f"MISSING:\n{txt}", (255, 0, 0), font=font)
     return torch.from_numpy(np.array(img).astype(np.float32) / 255.0)[None,]
 
-def load_image_file(file_path):
+def load_image_file(path):
     try:
-        img = Image.open(file_path).convert("RGB")
-        img = ImageOps.exif_transpose(img)
+        img = ImageOps.exif_transpose(Image.open(path).convert("RGB"))
         return torch.from_numpy(np.array(img).astype(np.float32) / 255.0)[None,]
     except: return None
 
-
 # ========================================================
-# 1. 🚀 字符加载器基类及节点 (String 5 / 10)
+# 1. 🚀 字符加载器基类及节点 (String 5 / 10) - 增强精准匹配
 # ========================================================
 class BaseTrucyLoaderDirect:
     def process_common(self, folder_path, empty_style, count, **kwargs):
@@ -66,37 +58,82 @@ class BaseTrucyLoaderDirect:
         return tuple(images)
 
     def parse_id(self, text):
+        # 严格解析出 前缀、数字、后缀字母
         match = re.match(r'^([a-zA-Z]+)(\d+)([a-zA-Z]?)$', text.strip())
-        if match: return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
+        if match: 
+            return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
         return None, None, None
 
     def parse_filename(self, filename):
+        # 解析文件名，支持 X1, X1a, X1-描述 等格式
         match = re.match(r'^([a-zA-Z]+)(\d+)([a-zA-Z]?)(?:[.\-_ \u4e00-\u9fa5].*)?$', filename)
-        if match: return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
+        if match: 
+            return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
         return None, None, None
 
     def find_file_smart(self, folder, input_str):
         if not os.path.exists(folder): return None
-        supported_exts = ["png", "jpg", "jpeg", "webp", "bmp"]
+        supported_exts = [".png", ".jpg", ".jpeg", ".webp", ".bmp"]
+        input_str = input_str.strip()
+        
+        # 1. 第一优先级：绝对精确匹配 (假设用户输入就是完整文件名不带后缀)
+        for ext in supported_exts:
+            exact_path = os.path.join(folder, f"{input_str}{ext}")
+            if os.path.isfile(exact_path): 
+                return exact_path
+
+        # 如果输入带有后缀，直接测试绝对路径
+        direct_path = os.path.join(folder, input_str)
+        if os.path.isfile(direct_path): 
+            return direct_path
+
+        # 2. 第二优先级：智能解析匹配 (解决 X1 和 X1a 的冲突)
+        inp_prefix, inp_num, inp_suffix = self.parse_id(input_str)
+        
         try:
-            for ext in supported_exts:
-                test_path = os.path.join(folder, f"{input_str}.{ext}")
-                if os.path.exists(test_path): return test_path
-            for f in os.listdir(folder):
-                if f.startswith(input_str) and any(f.lower().endswith(e) for e in supported_exts):
-                    return os.path.join(folder, f)
-        except: pass
+            all_files = sorted(os.listdir(folder))
+            if inp_prefix is not None:
+                candidates = []
+                for filename in all_files:
+                    if not any(filename.lower().endswith(ext) for ext in supported_exts): 
+                        continue
+                    
+                    name_stem = os.path.splitext(filename)[0]
+                    f_prefix, f_num, f_suffix = self.parse_filename(name_stem)
+                    
+                    if f_prefix is None: 
+                        continue
+                    
+                    # 【核心修复】：必须前缀、数字、后缀 *三个要素完全一致* 才算匹配！
+                    # 如果你输入 X1 (suffix=""), 遇到 X1a (f_suffix="a") 时，这里的条件将判定为 False！
+                    if (inp_prefix == f_prefix and inp_num == f_num and inp_suffix == f_suffix):
+                        candidates.append(filename)
+                        
+                if candidates:
+                    # 如果有多个候选（比如 X1.png 和 X1-描述.png），优先选名字最短的（即最纯粹的那个）
+                    candidates.sort(key=len)
+                    return os.path.join(folder, candidates[0])
+
+            # 3. 第三优先级：降级模糊匹配 (仅当以上都不符合时)
+            # 为了防止 X1 错误匹配到 X10 或 X1a，我们在匹配时要求必须遇到分隔符
+            for filename in all_files:
+                if any(filename.lower().endswith(ext) for ext in supported_exts):
+                    name_stem = os.path.splitext(filename)[0]
+                    # 只有当文件名恰好等于输入，或者输入之后紧跟的是分隔符/空格时才匹配
+                    if name_stem == input_str or name_stem.startswith(input_str + "-") or name_stem.startswith(input_str + "_") or name_stem.startswith(input_str + " "):
+                        return os.path.join(folder, filename)
+
+        except Exception as e: 
+            print(f"TrucyLoader Error: {e}")
+            
         return None
 
 class TrucyImageLoaderString5(BaseTrucyLoaderDirect):
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
-                "folder_path": ("STRING", {"default": "C:/Images/Assets"}),
-                "empty_style": (["White", "Black"], {"default": "White"}),
-            },
-            "optional": {f"img_txt_{i}": ("STRING", {"default": "0", "forceInput": True}) for i in range(1, 6)}
+            "required": {"folder_path": ("STRING", {"default": "C:/Images"}), "empty_style": (["White", "Black"],)},
+            "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 6)}
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*5, tuple(f"Img_{i}" for i in range(1, 6)), "run", "TrucyNodes/Toolkit"
     def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 5, **kwargs)
@@ -105,15 +142,11 @@ class TrucyImageLoaderString10(BaseTrucyLoaderDirect):
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {
-                "folder_path": ("STRING", {"default": "C:/Images/Assets"}),
-                "empty_style": (["White", "Black"], {"default": "White"}),
-            },
-            "optional": {f"img_txt_{i}": ("STRING", {"default": "0", "forceInput": True}) for i in range(1, 11)}
+            "required": {"folder_path": ("STRING", {"default": "C:/Images"}), "empty_style": (["White", "Black"],)},
+            "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 11)}
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*10, tuple(f"Img_{i}" for i in range(1, 11)), "run", "TrucyNodes/Toolkit"
     def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 10, **kwargs)
-
 
 # ========================================================
 # 2. 🚀 智能文本拆分器系列 (15路 / 30路全口径输出)
@@ -260,17 +293,18 @@ class TrucyFolderIterator:
                 "image_index": ("INT", {"default": 0, "min": 0}),
                 "filter_mode": (["Contains", "Not Contains"],),
                 "filter_text": ("STRING", {"default": ""}),
-                "extension": (["All", "png", "jpg", "jpeg", "webp"],),
+                "extension": (["All", "png", "jpg", "jpeg", "webp", "bmp"],),
                 "empty_style": (["White", "Black"],),
             }
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE", "STRING", "INT"), ("Image", "Filename", "Count"), "load", "TrucyNodes/Toolkit"
     def load(self, folder_path, image_index, filter_mode, filter_text, extension, empty_style):
         if not os.path.exists(folder_path): return create_placeholder(empty_style), "None", 0
-        valid = [f for f in os.listdir(folder_path) if any(f.lower().endswith(e) for e in ([f".{extension}"] if extension != "All" else [".png",".jpg",".jpeg",".webp"]))]
+        valid = [f for f in os.listdir(folder_path) if any(f.lower().endswith(e) for e in ([f".{extension}"] if extension != "All" else [".png",".jpg",".jpeg",".webp",".bmp"]))]
         if filter_text: valid = [f for f in valid if (filter_text in f) == (filter_mode == "Contains")]
         if not valid: return create_placeholder(empty_style), "None", 0
-        valid.sort(); target = valid[image_index % len(valid)]
+        valid.sort()
+        target = valid[image_index % len(valid)]
         img = load_image_file(os.path.join(folder_path, target))
         return img if img is not None else create_error_image(target), target, len(valid)
 
@@ -297,9 +331,8 @@ class TrucyDatasetSaver:
             counter += 1
         return {"ui": {"images": []}}
 
-
 # ========================================================
-# 注册映射 (对应 __init__.py 导入，不含任何拼图节点)
+# 注册映射 
 # ========================================================
 NODE_CLASS_MAPPINGS = {
     "TrucyImageLoaderString5": TrucyImageLoaderString5,
