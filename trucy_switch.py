@@ -13,10 +13,11 @@ class AlwaysEqualProxy(str):
 any_type = AlwaysEqualProxy("*")
 
 # ========================================================
-# 辅助函数：生成安全的兜底空对象，防止强类型节点无输入时崩溃
+# 辅助函数：生成安全的兜底空对象
 # ========================================================
 def generate_safe_placeholder(output_type):
-    if output_type == "IMAGE":
+    if output_type == "IMAGE" or output_type == "VIDEO":
+        # VIDEO 在 ComfyUI 绝大多数节点中，底层依然是用 IMAGE（4D Tensor）传递的
         return torch.zeros((1, 512, 512, 3), dtype=torch.float32)
     elif output_type == "LATENT":
         import comfy.model_management
@@ -32,9 +33,6 @@ def generate_safe_placeholder(output_type):
         return 0.0
     return None
 
-# ========================================================
-# 辅助函数：解析工作流网络拓扑结构
-# ========================================================
 def workflow_to_map(workflow):
     nodes_map = {}
     links_map = {}
@@ -85,7 +83,8 @@ class TrucyControlBridge:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "output_type": (["AUTO/ANY", "IMAGE", "LATENT", "AUDIO", "STRING", "INT", "FLOAT"], {"default": "IMAGE"}),
+                # --- 核心修改：新增 VIDEO 选项，兼容第三方视频流节点 ---
+                "output_type": (["AUTO/ANY", "IMAGE", "VIDEO", "LATENT", "AUDIO", "STRING", "INT", "FLOAT"], {"default": "IMAGE"}),
                 "mode": ("BOOLEAN", {"default": True, "label_on": "Active", "label_off": "Stop/Mute/Bypass"}),
                 "behavior": (["Stop", "Mute", "Bypass"], ),
             },
@@ -107,27 +106,22 @@ class TrucyControlBridge:
         except ImportError:
             ExecutionBlocker = None
 
-        # 如果没有连入真实数据，生成一个对应类型的安全空对象
         data_to_pass = value if value is not None else generate_safe_placeholder(output_type)
 
-        # 模式一：Stop (物理阻断，没有复活机制，因为它是直接把变量变成毒药)
         if behavior == "Stop":
             if mode:
                 return (data_to_pass,)
             else:
                 return (ExecutionBlocker(None) if ExecutionBlocker else None,)
         
-        # 模式二：Mute / Bypass (网页拓扑级控制，具备复活能力)
         if extra_pnginfo is None:
             return (data_to_pass,)
         
         try:
             workflow = extra_pnginfo['workflow']
             nodes_map, links_map = workflow_to_map(workflow)
-            
             target_nodes = []
             
-            # 精准寻找连接在当前桥接器输出口的所有下游节点
             if unique_id in nodes_map:
                 my_node = nodes_map[unique_id]
                 for output in my_node.get("outputs", []):
@@ -136,36 +130,28 @@ class TrucyControlBridge:
                             next_node_id = str(links_map[link_id][2])
                             impact_utils.collect_non_reroute_nodes(nodes_map, links_map, target_nodes, next_node_id)
             
-            target_nodes = list(set(target_nodes)) # 去重
+            target_nodes = list(set(target_nodes))
             
             if len(target_nodes) > 0:
                 nodes_to_change = []
                 action_to_take = None
                 
-                # 情况 A: 开关关闭 -> 下去杀人 (Mute/Bypass)
                 if not mode:
                     for tid in target_nodes:
                         current_mode = nodes_map[tid].get('mode', 0)
                         target_mode = 2 if behavior == "Mute" else 4
-                        # 只有当它还醒着，或者状态不对时，我们才发信号
                         if current_mode != target_mode:
                             nodes_to_change.append(tid)
-                            
                     if nodes_to_change:
                         action_to_take = "mutes" if behavior == "Mute" else "bypasses"
-
-                # 情况 B: 开关打开 -> 下去救人 (Active 唤醒)
                 else:
                     for tid in target_nodes:
                         current_mode = nodes_map[tid].get('mode', 0)
-                        # 如果它处于沉睡状态 (2=Mute, 4=Bypass, 3=Never, 等)，我们强行将其唤醒 (0=Active)
                         if current_mode != 0:
                             nodes_to_change.append(tid)
-                            
                     if nodes_to_change:
                         action_to_take = "actives"
                 
-                # 如果确实有需要改变状态的节点，立刻发送广播并打断当前线程
                 if action_to_take and nodes_to_change:
                     print(f"[TrucyNodes] Control Bridge '{action_to_take}' downstream nodes: {nodes_to_change}")
                     PromptServer.instance.send_sync("impact-bridge-continue", {"node_id": unique_id, action_to_take: nodes_to_change})

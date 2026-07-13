@@ -125,11 +125,27 @@ class TrucyVideoCombine:
 
         if temp_audio_path and os.path.exists(temp_audio_path): os.remove(temp_audio_path)
 
-        return {"ui": {"text": [file_path]}, "result": (file_path,)}
+        ui_results = {"text": [file_path]}
+        if preview_gif:
+            rand_id = random.randint(1000, 9999)
+            pre_name = f"trucy_pre_{counter}_{rand_id}.webp"
+            pre_path = os.path.join(folder_paths.get_temp_directory(), pre_name)
+            max_frames = 20
+            step = max(1, batch // max_frames)
+            frames = []
+            for i in range(0, batch, step):
+                img = Image.fromarray(images_np[i])
+                img.thumbnail((256, 256)) 
+                frames.append(img)
+            if frames:
+                frames[0].save(pre_path, format='WEBP', save_all=True, append_images=frames[1:], duration=100, loop=0, quality=80, method=6)
+                ui_results["images"] = [{"filename": pre_name, "subfolder": "", "type": "temp"}]
+
+        return {"ui": ui_results, "result": (file_path,)}
 
 
 # ========================================================
-# 2. 🚀 翠西 LTX 视频预处理 (Trucy LTX MSR)
+# 2. 🚀 翠西 LTX 视频预处理 (Trucy LTX MSR V2)
 # ========================================================
 class TrucyLTXMSR:
     @classmethod
@@ -138,7 +154,8 @@ class TrucyLTXMSR:
             "required": {
                 "width": ("INT", {"default": 1280, "min": 32, "max": 8192, "step": 32}),
                 "height": ("INT", {"default": 720, "min": 32, "max": 8192, "step": 32}),
-                "frame_count": ([17, 25, 33, 41, 49, 51, 57], {"default": 41}),
+                # --- 核心修改：删除了 51 帧，严格对齐作者最新的 49, 57, 65 选项 ---
+                "frame_count": ([17, 25, 33, 41, 49, 57, 65], {"default": 41}),
                 "bg_target": (["None"] + [f"img{i}" for i in range(1, 6)], {"default": "img5"}),
             },
             "optional": {
@@ -236,7 +253,6 @@ class TrucyLTXMSR:
 
 # ========================================================
 # 3. 🚀 智能代理视频加载器 (TrucyVideoLoaderIndex)
-# 包含自动抽帧、降分辨率代理生成、以及纯音视频分离提取
 # ========================================================
 class TrucyVideoLoaderIndex:
     @classmethod
@@ -250,10 +266,8 @@ class TrucyVideoLoaderIndex:
                 "file_format": (["mp4", "mov", "webm", "mkv", "avi"], {"default": "mp4"}),
                 "skip_first": ("INT", {"default": 0, "min": 0, "max": 9999}),
                 "load_cap": ("INT", {"default": -1, "min": -1, "max": 9999}),
-                # --- 代理降级选项 ---
                 "target_fps": (["Original", "16", "12", "8", "4"], {"default": "Original"}),
                 "max_size": (["Original", "1280", "1024", "832", "768", "720", "512", "480", "256", "128"], {"default": "Original"}),
-                # --- 音频提取选项 ---
                 "audio_sample_rate": ([48000, 44100, 32000, 24000, 16000], {"default": 48000}),
             }
         }
@@ -280,12 +294,10 @@ class TrucyVideoLoaderIndex:
     def load_video(self, directory_path, index_mode, index, sort_by, file_format, skip_first, load_cap, target_fps, max_size, audio_sample_rate):
         import torchaudio
         
-        # 1. 路径清洗
         clean_path = directory_path.strip().replace('"', '')
         if not os.path.isdir(clean_path):
             return (self._generate_error_frame("DIR_NOT_FOUND"), None, 24.0, 1, 0.0, "ERROR")
 
-        # 2. 文件扫描
         ext = f".{file_format.lower()}"
         files = [f for f in os.listdir(clean_path) if f.lower().endswith(ext)]
         if not files:
@@ -305,25 +317,21 @@ class TrucyVideoLoaderIndex:
         file_path = os.path.join(clean_path, selected_file)
         pure_name = os.path.splitext(selected_file)[0]
 
-        # --- 3. 读取视频帧与 Proxy 代理压缩 ---
         cap = cv2.VideoCapture(file_path)
         if not cap.isOpened():
             return (self._generate_error_frame("CORRUPTED_VIDEO"), None, 24.0, 1, 0.0, pure_name)
 
         orig_fps = float(cap.get(cv2.CAP_PROP_FPS))
-        if orig_fps <= 0: orig_fps = 24.0
-        
         total_orig_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if orig_fps <= 0: orig_fps = 24.0
         total_sec = total_orig_frames / orig_fps
 
-        # 抽帧逻辑计算
         frame_skip = 1
         if target_fps != "Original":
             t_fps = float(target_fps)
             if t_fps < orig_fps:
                 frame_skip = max(1, int(round(orig_fps / t_fps)))
 
-        # 缩放逻辑计算
         resize_flag = False
         target_w, target_h = 0, 0
         if max_size != "Original":
@@ -331,33 +339,22 @@ class TrucyVideoLoaderIndex:
             orig_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             orig_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             current_max = max(orig_w, orig_h)
-            
             if current_max > max_s:
                 resize_flag = True
                 scale = max_s / current_max
-                target_w = int(orig_w * scale)
-                target_h = int(orig_h * scale)
-                # 保证被 2 整除以防报错
-                target_w = target_w - (target_w % 2)
-                target_h = target_h - (target_h % 2)
+                target_w, target_h = int(orig_w * scale), int(orig_h * scale)
+                target_w, target_h = target_w - (target_w % 2), target_h - (target_h % 2)
 
         frames = []
         frame_idx = 0
-        
         while True:
             ret, frame = cap.read()
             if not ret: break
-            
-            # 执行抽帧
             if frame_idx % frame_skip == 0:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # 执行降分辨率
-                if resize_flag:
-                    frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                if resize_flag: frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
                 frames.append(frame)
-                
             frame_idx += 1
-            
         cap.release()
 
         if frames:
@@ -367,50 +364,158 @@ class TrucyVideoLoaderIndex:
             image_tensor = self._generate_error_frame("EMPTY_AFTER_CROP")
             final_frames_count = 1
 
-        # --- 4. 音轨提取与统一 ---
         audio_dict = None
         try:
             from torchaudio.io import StreamReader
             streamer = StreamReader(file_path)
-            
             audio_stream_idx = -1
             for i in range(streamer.num_src_streams):
                 if streamer.get_src_stream_info(i).media_type == "audio":
                     audio_stream_idx = i
                     break
-                    
             if audio_stream_idx != -1:
-                streamer.add_basic_audio_stream(
-                    frames_per_chunk=-1, 
-                    stream_index=audio_stream_idx,
-                    sample_rate=audio_sample_rate
-                )
+                streamer.add_basic_audio_stream(frames_per_chunk=-1, stream_index=audio_stream_idx, sample_rate=audio_sample_rate)
                 streamer.process_all_packets()
                 chunk = streamer.pop_chunks()[0]
                 if chunk is not None:
-                    waveform = chunk.T.unsqueeze(0)
-                    audio_dict = {"waveform": waveform, "sample_rate": audio_sample_rate}
-        except:
-            pass
+                    audio_dict = {"waveform": chunk.T.unsqueeze(0), "sample_rate": audio_sample_rate}
+        except: pass
 
         if audio_dict is None:
             silence_samples = int(audio_sample_rate * 1.0)
-            silent_wav = torch.zeros((1, 2, silence_samples), dtype=torch.float32)
-            audio_dict = {"waveform": silent_wav, "sample_rate": audio_sample_rate}
-
-        print(f"[TrucyNodes] Loaded Proxy Video: {selected_file} | Extracted {final_frames_count} frames | Orig FPS: {orig_fps}")
+            audio_dict = {"waveform": torch.zeros((1, 2, silence_samples), dtype=torch.float32), "sample_rate": audio_sample_rate}
 
         return (image_tensor, audio_dict, orig_fps, final_frames_count, total_sec, pure_name)
 
+# ========================================================
+# 4. 🚀 翠西 Bernini 视频预处理 (Trucy Bernini I2V)
+# ========================================================
+import logging
+from nodes import CLIPTextEncode
+
+try:
+    import node_helpers
+except ImportError:
+    node_helpers = None
+
+log = logging.getLogger("Trucy_Bernini_I2V")
+
+SYSTEM_PROMPT = "You are a helpful assistant specialized in image-to-video generation."
+DEFAULT_NEG_PROMPT = (
+    "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，"
+    "静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，"
+    "多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，"
+    "手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+)
+
+def _resize_long_edge(image, max_size, stride=16):
+    import comfy.utils
+    h, w = image.shape[1], image.shape[2]
+    scale = min(max_size / max(h, w), 1.0)
+    nh = max(stride, round(h * scale / stride) * stride)
+    nw = max(stride, round(w * scale / stride) * stride)
+    return comfy.utils.common_upscale(
+        image[:, :, :, :3].movedim(-1, 1), nw, nh, "area", "disabled"
+    ).movedim(1, -1)
+
+class TrucyBerniniI2V:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "clip": ("CLIP", ),
+                "vae": ("VAE", ),
+                "width": ("INT", {"default": 832, "min": 16, "max": 8192, "step": 16}),
+                "height": ("INT", {"default": 480, "min": 16, "max": 8192, "step": 16}),
+                "length": ("INT", {"default": 81, "min": 1, "max": 8192, "step": 4, "tooltip": "Wan的帧数规则: 4n+1 (如 81, 121)"}),
+                "batch_size": ("INT", {"default": 1, "min": 1, "max": 64}),
+                "prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": "", "tooltip": "描述画面。若用到特定图像，请使用 img1, img2 等标签指代。"}),
+                "negative_prompt": ("STRING", {"multiline": True, "dynamicPrompts": True, "default": "", "tooltip": "留空则自动使用官方默认中文反向提示词。"}),
+            },
+            "optional": {
+                "img1": ("IMAGE", {"tooltip": "通常作为背景/场景图"}),
+                "img2": ("IMAGE", {"tooltip": "人物/道具 1"}),
+                "img3": ("IMAGE", {"tooltip": "人物/道具 2"}),
+                "img4": ("IMAGE", {"tooltip": "人物/道具 3"}),
+                "img5": ("IMAGE", {"tooltip": "人物/道具 4"}),
+                "img6": ("IMAGE", ),
+                "img7": ("IMAGE", ),
+                "img8": ("IMAGE", ),
+            }
+        }
+
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive", "negative", "latent")
+    FUNCTION = "execute"
+    CATEGORY = "TrucyNodes/Video"
+
+    def execute(self, clip, vae, width, height, length, batch_size, prompt, negative_prompt,
+                img1=None, img2=None, img3=None, img4=None, img5=None, img6=None, img7=None, img8=None):
+        import comfy.model_management as mm
+        
+        def is_valid_image(img):
+            return img is not None and type(img).__name__ != 'ExecutionBlocker' and isinstance(img, torch.Tensor) and len(img.shape) == 4
+
+        input_images = [img1, img2, img3, img4, img5, img6, img7, img8]
+        valid_images = []
+        
+        working_prompt = prompt.strip()
+        actual_model_index = 0
+
+        for i, img in enumerate(input_images):
+            user_tag = f"img{i + 1}"
+            if is_valid_image(img):
+                valid_images.append(img)
+                model_tag = f"image{actual_model_index}"
+                
+                if user_tag in working_prompt:
+                    working_prompt = working_prompt.replace(user_tag, model_tag)
+                
+                actual_model_index += 1
+
+        full_prompt = SYSTEM_PROMPT + " " + working_prompt if working_prompt else SYSTEM_PROMPT
+        
+        neg_text = negative_prompt.strip()
+        if not neg_text:
+            neg_text = DEFAULT_NEG_PROMPT
+
+        _encoder = CLIPTextEncode()
+        positive = _encoder.encode(clip, full_prompt)[0]
+        negative = _encoder.encode(clip, neg_text)[0]
+
+        latent = torch.zeros(
+            [batch_size, 16, ((length - 1) // 4) + 1, height // 8, width // 8],
+            device=mm.intermediate_device(),
+        )
+
+        context = []
+        ref_max_size = 848  
+        
+        for ref_img in valid_images:
+            for frame_idx in range(ref_img.shape[0]):
+                img_resized = _resize_long_edge(ref_img[frame_idx:frame_idx + 1], ref_max_size)
+                context.append(vae.encode(img_resized[:, :, :, :3]))
+
+        if context:
+            if node_helpers is not None:
+                positive = node_helpers.conditioning_set_values(positive, {"context_latents": context})
+                negative = node_helpers.conditioning_set_values(negative, {"context_latents": context})
+            else:
+                for cond_list in [positive, negative]:
+                    for item in cond_list:
+                        item[1]["context_latents"] = context
+        return (positive, negative, {"samples": latent})
 
 NODE_CLASS_MAPPINGS = {
     "TrucyVideoCombine": TrucyVideoCombine,
     "TrucyLTXMSR": TrucyLTXMSR,
-    "TrucyVideoLoaderIndex": TrucyVideoLoaderIndex
+    "TrucyVideoLoaderIndex": TrucyVideoLoaderIndex,
+    "TrucyBerniniI2V": TrucyBerniniI2V
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyVideoCombine": "🚀 Trucy Video Combine",
     "TrucyLTXMSR": "🚀 Trucy LTX MSR (Video Prep)",
-    "TrucyVideoLoaderIndex": "🚀 Video Loader by Index (Trucy)"
+    "TrucyVideoLoaderIndex": "🚀 Video Loader by Index (Trucy)",
+    "TrucyBerniniI2V": "🚀 Bernini I2V (Simple) (Trucy)"
 }
