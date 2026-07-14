@@ -148,14 +148,17 @@ class TrucyVideoCombine:
 # 2. 🚀 翠西 LTX 视频预处理 (Trucy LTX MSR V2)
 # ========================================================
 class TrucyLTXMSR:
+    # 严格对齐官方要求的帧数
+    FRAME_COUNTS = (17, 25, 33, 41, 49, 57, 65)
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "width": ("INT", {"default": 1280, "min": 32, "max": 8192, "step": 32}),
                 "height": ("INT", {"default": 720, "min": 32, "max": 8192, "step": 32}),
-                # --- 核心修改：删除了 51 帧，严格对齐作者最新的 49, 57, 65 选项 ---
-                "frame_count": ([17, 25, 33, 41, 49, 57, 65], {"default": 41}),
+                # 兼容前端的新版字符串防报错写法
+                "frame_count": ([str(value) for value in cls.FRAME_COUNTS], {"default": "41"}),
                 "bg_target": (["None"] + [f"img{i}" for i in range(1, 6)], {"default": "img5"}),
             },
             "optional": {
@@ -166,6 +169,17 @@ class TrucyLTXMSR:
                 "img5": ("IMAGE",), 
             },
         }
+
+    # 同步官方补丁：安全验证机制
+    @classmethod
+    def VALIDATE_INPUTS(cls, frame_count, **kwargs):
+        try:
+            fc = int(frame_count)
+            if fc not in cls.FRAME_COUNTS:
+                return "frame_count must be one of: " + ", ".join(map(str, cls.FRAME_COUNTS))
+        except (TypeError, ValueError):
+            return "frame_count must be one of: " + ", ".join(map(str, cls.FRAME_COUNTS))
+        return True
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("video_frames",)
@@ -188,7 +202,10 @@ class TrucyLTXMSR:
         return tensor
 
     def create_video_frames(self, width, height, frame_count, bg_target, **kwargs):
-        regular_images = []
+        # 将前端传入的字符串安全转为整数参与计算
+        frame_count = int(frame_count)
+        
+        subjects = []
         background_image = None
         
         for i in range(1, 6):
@@ -196,22 +213,26 @@ class TrucyLTXMSR:
             image = kwargs.get(slot_name)
             
             if self._is_valid_image(image):
-                prepared_img = self._prepare_image(image, (width, height))
                 if slot_name == bg_target:
+                    # 背景图：必须满屏，采用裁切 (preserve_full=False)
+                    prepared_img = self._prepare_image_smart(image, (width, height), preserve_full=False)
                     background_image = prepared_img
                 else:
-                    regular_images.append(prepared_img)
+                    # 人物/资产图：保留全身，采用补白 (preserve_full=True)
+                    # 虽然原作者补白，但如果你的素材全是 16:9 或三视图，补白不会生效；如果是 9:16，补白才是最安全的
+                    prepared_img = self._prepare_image_smart(image, (width, height), preserve_full=True)
+                    subjects.append(prepared_img)
 
-        images_to_process = regular_images
+        images_to_process = subjects
         if background_image is not None:
             images_to_process.append(background_image)
 
         if not images_to_process:
             print("[TrucyNodes] Warning: LTX MSR received 0 valid images. Generating placeholder to prevent crash.")
             error_img = self._create_error_image(width, height)
-            images_to_process.append(self._prepare_image(error_img, (width, height)))
+            images_to_process.append(self._prepare_image_smart(error_img, (width, height), preserve_full=False))
 
-        frames = self._expand_frames(images_to_process, frame_count)
+        frames = self._expand_frames_v2(images_to_process, frame_count)
         output = torch.from_numpy(np.stack(frames).astype(np.float32) / 255.0)
         
         return (output,)
@@ -232,23 +253,119 @@ class TrucyLTXMSR:
         return np.ascontiguousarray(image)
 
     @staticmethod
-    def _prepare_image(image, target_size):
+    def _prepare_image_smart(image, target_size, preserve_full=False):
         image_array = TrucyLTXMSR._tensor_to_rgb_array(image)
-        pil_image = Image.fromarray(image_array).convert("RGB")
-        image_array = np.array(pil_image)
-        if image_array.shape[1] == target_size[0] and image_array.shape[0] == target_size[1]:
+        source_height, source_width = image_array.shape[:2]
+        target_width, target_height = target_size
+
+        if source_width == target_width and source_height == target_height:
             return np.ascontiguousarray(image_array)
-        return cv2.resize(image_array, target_size, interpolation=cv2.INTER_LANCZOS4)
+
+        if preserve_full:
+            # 【保留原作者的补白逻辑】：专为非标准比例(如 9:16)素材防腰斩
+            scale = min(target_width / source_width, target_height / source_height)
+            resized_width = max(1, min(target_width, round(source_width * scale)))
+            resized_height = max(1, min(target_height, round(source_height * scale)))
+            
+            if cv2 is not None:
+                interpolation = cv2.INTER_AREA if resized_width < source_width else cv2.INTER_LANCZOS4
+                resized = cv2.resize(image_array, (resized_width, resized_height), interpolation=interpolation)
+            else:
+                chw = torch.from_numpy(image_array).permute(2, 0, 1).unsqueeze(0).float()
+                resized_tensor = F.interpolate(chw, size=(resized_height, resized_width), mode="bicubic", align_corners=False)
+                resized = resized_tensor.squeeze(0).permute(1, 2, 0).clamp(0, 255).byte().numpy()
+
+            canvas = np.full((target_height, target_width, 3), 255, dtype=np.uint8)
+            left = (target_width - resized_width) // 2
+            top = (target_height - resized_height) // 2
+            canvas[top:top + resized_height, left:left + resized_width] = resized
+            return np.ascontiguousarray(canvas)
+
+        else:
+            # 【保留翠西特有的背景裁切逻辑】：保证背景 100% 铺满画面，无死白边
+            scale = max(target_width / source_width, target_height / source_height)
+            resized_width = max(target_width, round(source_width * scale))
+            resized_height = max(target_height, round(source_height * scale))
+            
+            if cv2 is not None:
+                interpolation = cv2.INTER_AREA if resized_width < source_width else cv2.INTER_LANCZOS4
+                resized = cv2.resize(image_array, (resized_width, resized_height), interpolation=interpolation)
+            else:
+                chw = torch.from_numpy(image_array).permute(2, 0, 1).unsqueeze(0).float()
+                resized_tensor = F.interpolate(chw, size=(resized_height, resized_width), mode="bicubic", align_corners=False)
+                resized = resized_tensor.squeeze(0).permute(1, 2, 0).clamp(0, 255).byte().numpy()
+
+            left = (resized_width - target_width) // 2
+            top = (resized_height - target_height) // 2
+            return np.ascontiguousarray(resized[top:top + target_height, left:left + target_width])
 
     @staticmethod
-    def _expand_frames(images, frame_count):
-        base_count = frame_count // len(images)
-        remainder = frame_count % len(images)
-        frames = []
-        for index, image in enumerate(images):
-            repeats = base_count + (1 if index < remainder else 0)
-            frames.extend([image] * repeats)
+    def _expand_frames_v2(images_to_process, frame_count):
+        # 【完美同步原作者的 8x 压缩边界算法】
+        latent_count = TrucyLTXMSR._estimate_ref_latent_frames(frame_count)
+        
+        background = images_to_process[-1]
+        frames = [background] * frame_count
+
+        subjects = images_to_process[:-1]
+        if not subjects:
+            return frames
+
+        subject_budget = max(0, latent_count - 1)
+        if subject_budget >= len(subjects):
+            counts = TrucyLTXMSR._allocate_subject_latent_counts(len(subjects), subject_budget)
+            cursor = 0
+            for image, count in zip(subjects, counts):
+                start, end = TrucyLTXMSR._latent_to_frame_range(cursor, cursor + count - 1)
+                cursor += count
+                for frame_index in range(max(0, start), min(frame_count - 1, end) + 1):
+                    frames[frame_index] = image
+        else:
+            subject_frame_count = max(1, TrucyLTXMSR._latent_to_frame_range(0, max(0, latent_count - 2))[1] + 1)
+            for index, image in enumerate(subjects):
+                start = int(index * subject_frame_count / len(subjects))
+                end = int((index + 1) * subject_frame_count / len(subjects)) - 1
+                if index == len(subjects) - 1:
+                    end = subject_frame_count - 1
+                for frame_index in range(start, min(frame_count - 1, max(start, end)) + 1):
+                    frames[frame_index] = image
+
         return frames
+
+    @staticmethod
+    def _estimate_ref_latent_frames(source_frame_count):
+        if source_frame_count <= 1: return max(1, source_frame_count)
+        return int(round((source_frame_count - 1) / 8.0)) + 1
+
+    @staticmethod
+    def _latent_to_frame_range(latent_start, latent_end):
+        latent_start, latent_end = int(latent_start), int(latent_end)
+        frame_start = 0 if latent_start <= 0 else 1 + (latent_start - 1) * 8
+        frame_end = 0 if latent_end <= 0 else latent_end * 8
+        return frame_start, frame_end
+
+    @staticmethod
+    def _allocate_subject_latent_counts(num_subjects, subject_budget):
+        counts = [1] * num_subjects
+        extra = max(0, int(subject_budget) - num_subjects)
+        if extra > 0:
+            counts[0] += 1
+            extra -= 1
+        index = 1
+        while extra > 0 and num_subjects > 1 and any(c < 2 for c in counts[1:]):
+            if counts[index] < 2:
+                counts[index] += 1
+                extra -= 1
+            index = index + 1 if index + 1 < num_subjects else 1
+        if extra > 0 and counts[0] < 3:
+            counts[0] += 1
+            extra -= 1
+        index = 0
+        while extra > 0:
+            counts[index] += 1
+            extra -= 1
+            index = (index + 1) % num_subjects
+        return counts
 
 
 # ========================================================
