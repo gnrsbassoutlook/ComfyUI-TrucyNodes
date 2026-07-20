@@ -13,6 +13,7 @@ def _patched_Popen_init(self, *args, **kwargs):
 subprocess.Popen.__init__ = _patched_Popen_init
 # ========================================================
 
+
 # 1. 基础模块导入 (音频、文本、Excel、核心溶图、图像适配)
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart
@@ -49,6 +50,10 @@ from .trucy_loop import (
     TrucyForLoopStart2ch, TrucyForLoopEnd2ch
 )
 
+# 6. 前端远程控制模块导入 (trucy_remote.py)
+# 【修改点】：在这里增加了刚才为你写的 TrucyMasterIntRouter
+from .trucy_remote import TrucyRemoteToggle5x5, TrucyMasterIntRouter
+
 # ========================================================
 # 节点类名映射 (ComfyUI 内部逻辑识别)
 # ========================================================
@@ -70,6 +75,10 @@ NODE_CLASS_MAPPINGS = {
     "TrucyAnySwitch5": TrucyAnySwitch5,
     "TrucyAnySwitch10": TrucyAnySwitch10,
     "TrucyControlBridge": TrucyControlBridge,
+    
+    # 【修改点】：这里注册了你的两个远程控制器
+    "TrucyRemoteToggle5x5": TrucyRemoteToggle5x5, 
+    "TrucyMasterIntRouter": TrucyMasterIntRouter,
     
     # 核心溶图与分辨率适配
     "TrucyExcelReader": TrucyExcelReader,
@@ -123,6 +132,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAnySwitch5": "🚀 Any Switch (5ch) (Trucy)",
     "TrucyAnySwitch10": "🚀 Any Switch (10ch) (Trucy)",
     "TrucyControlBridge": "🚀 Control Bridge (Trucy)",
+    
+    # 【修改点】：给你的新节点起一个酷炫的显示名字
+    "TrucyRemoteToggle5x5": "🚀 Remote Toggle 5x5 (Trucy)", 
+    "TrucyMasterIntRouter": "🚀 5-way Mute/Bypass Nodes-Remote (Trucy)", 
     
     "TrucyExcelReader": "🚀 Excel Cell Reader (Trucy)",
     "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
