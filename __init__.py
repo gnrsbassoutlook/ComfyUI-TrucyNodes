@@ -16,7 +16,7 @@ subprocess.Popen.__init__ = _patched_Popen_init
 
 # 1. 基础模块导入 (音频、文本、Excel、核心溶图、图像适配)
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
-from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart
+from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart, TrucyTextCleaner
 from .excel_nodes import TrucyExcelReader
 from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
 from .image_adapter import TrucyImageAdapter, TrucyAssetGrid5, TrucyAssetGrid10, TrucyImageBridge5, TrucyImageBridge10
@@ -70,6 +70,7 @@ NODE_CLASS_MAPPINGS = {
     "TrucySymbolSniffer": TrucySymbolSniffer,
     "TrucyTextToNumber": TrucyTextToNumber,
     "TrucyTextSlicerSmart": TrucyTextSlicerSmart, 
+    "TrucyTextCleaner": TrucyTextCleaner,
     
     # 万能切换器与桥接控制
     "TrucyAnySwitch5": TrucyAnySwitch5,
@@ -128,6 +129,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
     "TrucyTextToNumber": "🚀 Text to Number Converter (Trucy)",
     "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)", 
+    "TrucyTextCleaner": "🚀 Text Cleaner (Trucy)",
     
     "TrucyAnySwitch5": "🚀 Any Switch (5ch) (Trucy)",
     "TrucyAnySwitch10": "🚀 Any Switch (10ch) (Trucy)",

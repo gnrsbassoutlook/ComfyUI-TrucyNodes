@@ -1,17 +1,14 @@
 import os
 import re
+import shutil
 
-# --- 引入万能胶水类型 ---
 class AlwaysEqualProxy(str):
     def __eq__(self, _): return True
     def __ne__(self, _): return False
-
 any_type = AlwaysEqualProxy("*")
 
-# --- 辅助函数：智能提取第一个数字 ---
 def extract_numbers(text):
-    if not text or str(text).strip() == "":
-        return 0, 0.0
+    if not text or str(text).strip() == "": return 0, 0.0
     match = re.search(r"[-+]?\d*\.\d+|[-+]?\d+", str(text))
     if match:
         num_str = match.group()
@@ -19,12 +16,11 @@ def extract_numbers(text):
             res_f = float(num_str)
             res_i = int(res_f)
             return res_i, res_f
-        except:
-            return 0, 0.0
+        except: return 0, 0.0
     return 0, 0.0
 
 # ======================================================================
-# 1. 文本索引加载器 (TrucyTxtBatchLoader)
+# 1. 文本索引加载器
 # ======================================================================
 class TrucyTxtBatchLoader:
     @classmethod
@@ -55,7 +51,7 @@ class TrucyTxtBatchLoader:
         if not os.path.isdir(clean_path): return ("Error: Directory not found", "N/A", "", "")
         files = [f for f in os.listdir(clean_path) if f.lower().endswith('.txt')]
         if not files: return ("No TXT files found", "N/A", "", "")
-        if sort_by == "Alphabetical (A-Z)": files.sort()
+        if sort_by == "Alphabetical (A-Z)": files.sort(key=lambda x: x.lower())
         else: files.sort(key=lambda x: os.path.getctime(os.path.join(clean_path, x)))
         files = files[skip_first:]
         if load_cap != -1: files = files[:load_cap]
@@ -95,10 +91,10 @@ class TrucyTxtPreviewAndSave:
                 "save_to_file": ("BOOLEAN", {"default": False, "label_on": "Save ON", "label_off": "Save OFF"}),
                 "directory_path": ("STRING", {"default": "C:\\output"}),
                 "file_name": ("STRING", {"default": "scene_note"}),
+                "history_subfolder": ("STRING", {"default": "Pass_Prompt"}),
                 "encoding": (["UTF-8", "ANSI (GBK)"], {"default": "UTF-8"}),
             },
             "optional": {
-                # 改为 optional 并在内部做容错，即使不连线也不会崩溃
                 "text": (any_type,),
             }
         }
@@ -108,35 +104,58 @@ class TrucyTxtPreviewAndSave:
     FUNCTION = "process_text"
     CATEGORY = "TrucyNodes/Text"
 
-    def process_text(self, save_to_file, directory_path, file_name, encoding, **kwargs):
-        # 获取可选的输入值，若无则设为空
+    # --- 🚀 核心修复：强制打碎缓存，确保在 Loop 循环中每一轮都被执行！ ---
+    @classmethod
+    def IS_CHANGED(cls, **kwargs):
+        import time
+        # 返回当前精确的时间戳，确保 ComfyUI 认为每次输入都不一样
+        return time.time()
+
+    def process_text(self, save_to_file, directory_path, file_name, history_subfolder, encoding, **kwargs):
         text = kwargs.get("text", "")
+        # 如果收到阻断器信号，退化为空字符串
         text_str = str(text) if text is not None and type(text).__name__ != 'ExecutionBlocker' else ""
 
+        # --- 保存逻辑 ---
         if save_to_file and text_str:
+            import shutil
             clean_dir = directory_path.strip().replace('"', '')
-            try: os.makedirs(clean_dir, exist_ok=True)
+            
+            try: 
+                os.makedirs(clean_dir, exist_ok=True)
             except:
                 clean_dir = os.path.join(os.path.expanduser("~"), "Documents", "TrucyNodes_Output")
                 os.makedirs(clean_dir, exist_ok=True)
+                
             base_name = file_name.strip()
-            if base_name.lower().endswith(".txt"): base_name = base_name[:-4]
-            final_filename = f"{base_name}.txt"
-            full_path = os.path.join(clean_dir, final_filename)
-            counter = 1
-            while os.path.exists(full_path):
-                final_filename = f"{base_name}_{counter}.txt"
-                full_path = os.path.join(clean_dir, final_filename)
-                counter += 1
+            if base_name.lower().endswith(".txt"): 
+                base_name = base_name[:-4]
+            
+            main_file_path = os.path.join(clean_dir, f"{base_name}.txt")
+            
+            # 版本归档逻辑：旧的挪走，新的上位
+            if os.path.exists(main_file_path):
+                archive_dir = os.path.join(clean_dir, history_subfolder.strip())
+                os.makedirs(archive_dir, exist_ok=True)
+                counter = 1
+                backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
+                while os.path.exists(backup_path):
+                    counter += 1
+                    backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
+                shutil.move(main_file_path, backup_path)
+            
             file_enc = "utf-8" if encoding == "UTF-8" else "gbk"
             try:
-                with open(full_path, "w", encoding=file_enc) as f: f.write(text_str)
-            except Exception as e: print(f"Save Error: {str(e)}")
+                with open(main_file_path, "w", encoding=file_enc) as f: 
+                    f.write(text_str)
+                print(f"[TrucyNodes] 文本已成功保存至: {main_file_path}")
+            except Exception as e: 
+                print(f"[TrucyNodes] Save Error: {str(e)}")
         
         return {"ui": {"text": [text_str]}, "result": (text_str,)}
 
 # ======================================================================
-# 3. 文本符号嗅探器 (TrucySymbolSniffer)
+# 3. 文本符号嗅探器
 # ======================================================================
 class TrucySymbolSniffer:
     @classmethod
@@ -152,7 +171,6 @@ class TrucySymbolSniffer:
                 "slot_6": ("STRING", {"default": "^"}),
             },
             "optional": {
-                # 改为 optional
                 "text_input": (any_type,),
             }
         }
@@ -185,15 +203,13 @@ class TrucySymbolSniffer:
         return (final_val, str(final_val), text_str)
 
 # ======================================================================
-# 4. 纯文字智能转换器 (TrucyTextToNumber)
+# 4. 纯文字智能转换器
 # ======================================================================
 class TrucyTextToNumber:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {
-                "text": ("STRING", {"default": "", "multiline": True}),
-            }
+            "required": {"text": ("STRING", {"default": "", "multiline": True})}
         }
     RETURN_TYPES = ("STRING", "INT", "FLOAT", "BOOLEAN")
     RETURN_NAMES = ("string", "int", "float", "boolean")
@@ -208,7 +224,7 @@ class TrucyTextToNumber:
         return (text, res_i, res_f, res_b)
 
 # ======================================================================
-# 5. 智能文本切割器 (TrucyTextSlicerSmart) - 【究极防崩溃版】
+# 5. 智能文本切割器 (TrucyTextSlicerSmart) - 【加入严格模式防御】
 # ======================================================================
 class TrucyTextSlicerSmart:
     @classmethod
@@ -216,74 +232,144 @@ class TrucyTextSlicerSmart:
         return {
             "required": {
                 "left_delimiter": ("STRING", {"default": "<prompt>"}),
-                "right_delimiter": ("STRING", {"default": "End]"}),
+                "right_delimiter": ("STRING", {"default": "</prompt>"}), # 为了保险，这里改成了标准的闭合标签
                 "match_index": ("INT", {"default": 1, "min": 1, "max": 999}),
                 "include_delimiters": ("BOOLEAN", {"default": False, "label_on": "包含符号", "label_off": "排除符号"}),
+                # 🚀 新增核心防御装甲：严格模式
+                "strict_mode": ("BOOLEAN", {"default": True, "label_on": "严格边界(防污染)", "label_off": "普通匹配"}),
             },
-            "optional": {
-                # 【核心修改】将 text_input 移入 optional，避免断线或被上游禁用时报错
-                "text_input": (any_type,),
-            }
+            "optional": {"text_input": (any_type,)}
         }
     RETURN_TYPES = ("STRING", "INT", "FLOAT")
     RETURN_NAMES = ("string_value", "int_value", "float_value")
     FUNCTION = "slice_text"
     CATEGORY = "TrucyNodes/Text"
 
-    def slice_text(self, left_delimiter, right_delimiter, match_index, include_delimiters, **kwargs):
-        # 安全获取上游数据
+    def _find_strict(self, text, delimiter, start_pos=0):
+        """严格模式下的查找：要求分隔符独立成行，或处于文本边缘"""
+        # 转义分隔符，防止正则报错
+        escaped_delim = re.escape(delimiter)
+        # 正则含义：(行首或前面有换行符/空格) + 目标字符 + (行尾或后面有换行符/空格)
+        # 这完美防止了 "在 <assets> 描述中" 被误判
+        pattern = r'(?:^|[\r\n\s])(' + escaped_delim + r')(?:[\r\n\s]|$)'
+        
+        # 必须从指定的 start_pos 开始往后找
+        search_area = text[start_pos:]
+        match = re.search(pattern, search_area)
+        
+        if match:
+            # 加上 start_pos，返回目标字符在原文中的真实起始位置
+            return start_pos + match.start(1)
+        return -1
+
+    def slice_text(self, left_delimiter, right_delimiter, match_index, include_delimiters, strict_mode, **kwargs):
         text_input = kwargs.get("text_input", None)
-
-        # 【超级防空保护】
-        # 如果你没连线（None），或者上游节点被 Bypass（可能传回 None 或 ExecutionBlocker），一律安全兜底！
-        if text_input is None or type(text_input).__name__ == 'ExecutionBlocker':
-            return ("", 0, 0.0)
-
-        # 强制转化为字符串
+        if text_input is None or type(text_input).__name__ == 'ExecutionBlocker': return ("", 0, 0.0)
         text_str = str(text_input)
+        if text_str.strip() == "": return ("", 0, 0.0)
 
-        if text_str.strip() == "":
-            return ("", 0, 0.0)
+        left = left_delimiter.strip()
+        right = right_delimiter.strip()
 
-        if left_delimiter == "" and right_delimiter == "":
+        if left == "" and right == "":
             res_int, res_float = extract_numbers(text_str)
             return (text_str.strip(), res_int, res_float)
 
-        pos = 0
-        start_pos = -1
-
+        pos, start_pos = 0, -1
         for _ in range(match_index):
-            found = text_str.find(left_delimiter, pos)
+            if strict_mode:
+                found = self._find_strict(text_str, left, pos)
+            else:
+                found = text_str.find(left, pos)
+                
             if found == -1: return ("OUT_OF_RANGE", 0, 0.0)
             start_pos = found
-            pos = found + len(left_delimiter)
+            pos = found + len(left)
 
-        content_start = start_pos + len(left_delimiter)
-
-        if right_delimiter == "":
+        content_start = start_pos + len(left)
+        
+        if right == "":
             inner_content = text_str[content_start:]
             string_output = text_str[start_pos:] if include_delimiters else inner_content
         else:
-            end_pos = text_str.find(right_delimiter, content_start)
+            if strict_mode:
+                end_pos = self._find_strict(text_str, right, content_start)
+            else:
+                end_pos = text_str.find(right, content_start)
+                
             if end_pos == -1: return ("OUT_OF_RANGE", 0, 0.0)
             inner_content = text_str[content_start:end_pos]
-            if include_delimiters:
-                string_output = text_str[start_pos : end_pos + len(right_delimiter)]
-            else:
-                string_output = inner_content
+            string_output = text_str[start_pos : end_pos + len(right)] if include_delimiters else inner_content
 
         cleaned_output = string_output.strip()
         cleaned_inner = inner_content.strip()
         res_int, res_float = extract_numbers(cleaned_inner)
-
         return (cleaned_output, res_int, res_float)
+
+# ======================================================================
+# 6. 文本污点清洗器 (TrucyTextCleaner) 
+# ======================================================================
+class TrucyTextCleaner:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "remove_keywords": ("STRING", {"default": "@img,@bg"}),
+                "fuzz_direction": (["Forward (向后)", "Backward (向前)", "Both (前后)", "Target Only (仅目标)"], {"default": "Forward (向后)"}),
+                "fuzz_type": (["Digits (数字)", "Letters (字母)", "Chinese (中文)", "Any (任意字符)"], {"default": "Digits (数字)"}),
+                "fuzz_length": ("INT", {"default": 3, "min": 1, "max": 99}),
+            },
+            "optional": {
+                "text_input": (any_type,),
+            }
+        }
+    
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("cleaned_text",)
+    FUNCTION = "clean_text"
+    CATEGORY = "TrucyNodes/Text"
+
+    def clean_text(self, remove_keywords, fuzz_direction, fuzz_type, fuzz_length, **kwargs):
+        text_input = kwargs.get("text_input", None)
+        if text_input is None or type(text_input).__name__ == 'ExecutionBlocker':
+            return ("",)
+            
+        text_str = str(text_input)
+        if not text_str.strip() or not remove_keywords.strip():
+            return (text_str,)
+
+        targets = [t.strip() for t in re.split(r'[,，]', remove_keywords) if t.strip()]
+        if not targets: return (text_str,)
+
+        escaped_targets = [re.escape(t) for t in targets]
+        target_group = f"({'|'.join(escaped_targets)})"
+
+        type_map = {
+            "Digits (数字)": r"\d",
+            "Letters (字母)": r"[a-zA-Z]",
+            "Chinese (中文)": r"[\u4e00-\u9fa5]",
+            "Any (任意字符)": r"."
+        }
+        f_char = type_map.get(fuzz_type, r".")
+        fuzz_pattern = f"{f_char}{{0,{fuzz_length}}}"
+
+        if fuzz_direction == "Forward (向后)": pattern = f"{target_group}{fuzz_pattern}"
+        elif fuzz_direction == "Backward (向前)": pattern = f"{fuzz_pattern}{target_group}"
+        elif fuzz_direction == "Both (前后)": pattern = f"{fuzz_pattern}{target_group}{fuzz_pattern}"
+        else: pattern = target_group
+
+        cleaned_text = re.sub(pattern, "", text_str)
+        cleaned_text = re.sub(r' +', ' ', cleaned_text).strip()
+
+        return (cleaned_text,)
 
 NODE_CLASS_MAPPINGS = {
     "TrucyTxtBatchLoader": TrucyTxtBatchLoader,
     "TrucyTxtPreviewAndSave": TrucyTxtPreviewAndSave,
     "TrucySymbolSniffer": TrucySymbolSniffer,
     "TrucyTextToNumber": TrucyTextToNumber,
-    "TrucyTextSlicerSmart": TrucyTextSlicerSmart  
+    "TrucyTextSlicerSmart": TrucyTextSlicerSmart,
+    "TrucyTextCleaner": TrucyTextCleaner
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -291,5 +377,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyTxtPreviewAndSave": "🚀 Text Preview & Save (Trucy)",
     "TrucySymbolSniffer": "🚀 Text Symbol Sniffer (Trucy)",
     "TrucyTextToNumber": "🚀 Text to Number Converter (Trucy)",
-    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)"  
+    "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)",
+    "TrucyTextCleaner": "🚀 Text Cleaner (Trucy)"
 }
