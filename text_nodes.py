@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import time
 
 class AlwaysEqualProxy(str):
     def __eq__(self, _): return True
@@ -81,7 +82,7 @@ class TrucyTxtBatchLoader:
         return (selected_content, selected_filename, merged_3[:1000000], merged_4[:1000000])
 
 # ======================================================================
-# 2. 文本预览与智能保存 (TrucyTxtPreviewAndSave)
+# 2. 文本预览与智能保存 (TrucyTxtPreviewAndSave) - 🍏 极简纯净版
 # ======================================================================
 class TrucyTxtPreviewAndSave:
     @classmethod
@@ -98,27 +99,25 @@ class TrucyTxtPreviewAndSave:
                 "text": (any_type,),
             }
         }
-    OUTPUT_NODE = True
+    
+    OUTPUT_NODE = True  # 告诉 ComfyUI 这是一个终端输出节点
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "process_text"
     CATEGORY = "TrucyNodes/Text"
 
-    # --- 🚀 核心修复：强制打碎缓存，确保在 Loop 循环中每一轮都被执行！ ---
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        import time
-        # 返回当前精确的时间戳，确保 ComfyUI 认为每次输入都不一样
-        return time.time()
+        # 只要节点在主逻辑链上，NaN 就能保证它每次被强制执行
+        return float("NaN")
 
     def process_text(self, save_to_file, directory_path, file_name, history_subfolder, encoding, **kwargs):
         text = kwargs.get("text", "")
-        # 如果收到阻断器信号，退化为空字符串
+        # 处理阻断器信号
         text_str = str(text) if text is not None and type(text).__name__ != 'ExecutionBlocker' else ""
 
         # --- 保存逻辑 ---
         if save_to_file and text_str:
-            import shutil
             clean_dir = directory_path.strip().replace('"', '')
             
             try: 
@@ -133,25 +132,30 @@ class TrucyTxtPreviewAndSave:
             
             main_file_path = os.path.join(clean_dir, f"{base_name}.txt")
             
-            # 版本归档逻辑：旧的挪走，新的上位
-            if os.path.exists(main_file_path):
-                archive_dir = os.path.join(clean_dir, history_subfolder.strip())
-                os.makedirs(archive_dir, exist_ok=True)
-                counter = 1
-                backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
-                while os.path.exists(backup_path):
-                    counter += 1
-                    backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
-                shutil.move(main_file_path, backup_path)
-            
-            file_enc = "utf-8" if encoding == "UTF-8" else "gbk"
             try:
+                # 复制备份机制（防止 Windows 文件锁）
+                if os.path.exists(main_file_path):
+                    archive_dir = os.path.join(clean_dir, history_subfolder.strip())
+                    os.makedirs(archive_dir, exist_ok=True)
+                    counter = 1
+                    backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
+                    
+                    while os.path.exists(backup_path):
+                        counter += 1
+                        backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
+                    
+                    shutil.copy2(main_file_path, backup_path)
+                
+                # 写入新内容
+                file_enc = "utf-8" if encoding == "UTF-8" else "gbk"
                 with open(main_file_path, "w", encoding=file_enc) as f: 
                     f.write(text_str)
                 print(f"[TrucyNodes] 文本已成功保存至: {main_file_path}")
+            
             except Exception as e: 
-                print(f"[TrucyNodes] Save Error: {str(e)}")
+                print(f"\n❌ [TrucyNodes] 保存错误: {str(e)}\n")
         
+        # 原封不动输出文本，方便连给后续节点或 Loop End
         return {"ui": {"text": [text_str]}, "result": (text_str,)}
 
 # ======================================================================
@@ -224,7 +228,7 @@ class TrucyTextToNumber:
         return (text, res_i, res_f, res_b)
 
 # ======================================================================
-# 5. 智能文本切割器 (TrucyTextSlicerSmart) - 【加入严格模式防御】
+# 5. 智能文本切割器 (TrucyTextSlicerSmart)
 # ======================================================================
 class TrucyTextSlicerSmart:
     @classmethod
@@ -232,10 +236,9 @@ class TrucyTextSlicerSmart:
         return {
             "required": {
                 "left_delimiter": ("STRING", {"default": "<prompt>"}),
-                "right_delimiter": ("STRING", {"default": "</prompt>"}), # 为了保险，这里改成了标准的闭合标签
+                "right_delimiter": ("STRING", {"default": "</prompt>"}),
                 "match_index": ("INT", {"default": 1, "min": 1, "max": 999}),
                 "include_delimiters": ("BOOLEAN", {"default": False, "label_on": "包含符号", "label_off": "排除符号"}),
-                # 🚀 新增核心防御装甲：严格模式
                 "strict_mode": ("BOOLEAN", {"default": True, "label_on": "严格边界(防污染)", "label_off": "普通匹配"}),
             },
             "optional": {"text_input": (any_type,)}
@@ -246,19 +249,11 @@ class TrucyTextSlicerSmart:
     CATEGORY = "TrucyNodes/Text"
 
     def _find_strict(self, text, delimiter, start_pos=0):
-        """严格模式下的查找：要求分隔符独立成行，或处于文本边缘"""
-        # 转义分隔符，防止正则报错
         escaped_delim = re.escape(delimiter)
-        # 正则含义：(行首或前面有换行符/空格) + 目标字符 + (行尾或后面有换行符/空格)
-        # 这完美防止了 "在 <assets> 描述中" 被误判
         pattern = r'(?:^|[\r\n\s])(' + escaped_delim + r')(?:[\r\n\s]|$)'
-        
-        # 必须从指定的 start_pos 开始往后找
         search_area = text[start_pos:]
         match = re.search(pattern, search_area)
-        
         if match:
-            # 加上 start_pos，返回目标字符在原文中的真实起始位置
             return start_pos + match.start(1)
         return -1
 
