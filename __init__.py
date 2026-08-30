@@ -39,7 +39,11 @@ from .text_nodes import (
     TrucyTextCleaner,
 )
 
-from .excel_nodes import TrucyExcelReader
+from .excel_nodes import (
+    TrucyExcelReader,
+    TrucyExcelReader5,
+    TrucyExcelReader10,
+)
 
 from .klein_nodes import (
     TrucyKleinEncode,
@@ -191,6 +195,8 @@ NODE_CLASS_MAPPINGS = {
     # Excel、核心溶图与分辨率适配
     # ----------------------------------------------------
     "TrucyExcelReader": TrucyExcelReader,
+    "TrucyExcelReader5": TrucyExcelReader5,
+    "TrucyExcelReader10": TrucyExcelReader10,
     "TrucyKleinEncode": TrucyKleinEncode,
     "TrucyKleinEncode5": TrucyKleinEncode5,
     "TrucyImageAdapter": TrucyImageAdapter,
@@ -309,8 +315,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # ----------------------------------------------------
     # Excel、核心溶图与图像适配
     # ----------------------------------------------------
-    "TrucyExcelReader":
-        "🚀 Excel Cell Reader (Trucy)",
+    "TrucyExcelReader": 
+        "🚀 Excel-Reader-Trucy",
+        
+    "TrucyExcelReader5": 
+        "🚀 Excel-Reader-5-Trucy",
+        
+    "TrucyExcelReader10":
+        "🚀 Excel-Reader-10-Trucy",
 
     "TrucyKleinEncode":
         "🚀 Klein-Model Text Encode (10ch) (Trucy)",
