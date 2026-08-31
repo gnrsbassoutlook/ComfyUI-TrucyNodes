@@ -114,7 +114,30 @@ except Exception as e:
 
 
 # ========================================================
-# 5. 高阶逻辑循环模块导入 (trucy_loop.py)
+# 5. Trucy 增强版视频合并模块安全导入 (trucy_video_combine.py)
+# ========================================================
+try:
+    from .trucy_video_combine import TrucyVideoCombine
+
+except Exception as e:
+    print(
+        f"\n[TrucyNodes] ❌ 导入 trucy_video_combine.py 失败！"
+        f"错误信息：{e}"
+    )
+
+    import traceback
+    traceback.print_exc()
+
+    print(
+        "[TrucyNodes] "
+        "--------------------------------------------------\n"
+    )
+
+    TrucyVideoCombine = None
+
+
+# ========================================================
+# 6. 高阶逻辑循环模块导入 (trucy_loop.py)
 # ========================================================
 from .trucy_loop import (
     TrucyForLoopStart9ch,
@@ -125,7 +148,7 @@ from .trucy_loop import (
 
 
 # ========================================================
-# 6. 前端远程控制模块导入 (trucy_remote.py)
+# 7. 前端远程控制模块导入 (trucy_remote.py)
 # ========================================================
 from .trucy_remote import (
     TrucyRemoteToggle5x5,
@@ -134,7 +157,7 @@ from .trucy_remote import (
 
 
 # ========================================================
-# 7. 绝对路径文档加载器安全导入 (trucy_doc.py)
+# 8. 绝对路径文档加载器安全导入 (trucy_doc.py)
 # ========================================================
 try:
     from .trucy_doc import TrucyDocLoader
@@ -228,27 +251,22 @@ NODE_CLASS_MAPPINGS = {
 
 
 # ========================================================
-# 动态挂载可能受环境影响的视频、MiniMax H3 和文档节点
+# 动态挂载可能受环境影响的视频、文档和合并节点
 # ========================================================
 if TrucyVideoLoaderIndex is not None:
-    NODE_CLASS_MAPPINGS[
-        "TrucyVideoLoaderIndex"
-    ] = TrucyVideoLoaderIndex
+    NODE_CLASS_MAPPINGS["TrucyVideoLoaderIndex"] = TrucyVideoLoaderIndex
 
 if TrucyMiniMaxH3Prep is not None:
-    NODE_CLASS_MAPPINGS[
-        "TrucyMiniMaxH3Prep"
-    ] = TrucyMiniMaxH3Prep
+    NODE_CLASS_MAPPINGS["TrucyMiniMaxH3Prep"] = TrucyMiniMaxH3Prep
 
 if TrucyMiniMaxH3Prompt is not None:
-    NODE_CLASS_MAPPINGS[
-        "TrucyMiniMaxH3Prompt"
-    ] = TrucyMiniMaxH3Prompt
+    NODE_CLASS_MAPPINGS["TrucyMiniMaxH3Prompt"] = TrucyMiniMaxH3Prompt
 
 if TrucyDocLoader is not None:
-    NODE_CLASS_MAPPINGS[
-        "TrucyDocLoader"
-    ] = TrucyDocLoader
+    NODE_CLASS_MAPPINGS["TrucyDocLoader"] = TrucyDocLoader
+
+if TrucyVideoCombine is not None:
+    NODE_CLASS_MAPPINGS["TrucyVideoCombine"] = TrucyVideoCombine
 
 
 # ========================================================
@@ -383,6 +401,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     "TrucyMiniMaxH3Prompt":
         "🚀 MiniMax H3 Prompt & Conditioning (Trucy)",
+
+    "TrucyVideoCombine":
+        "🚀 Video-Combine-Trucy",
 
     # ----------------------------------------------------
     # 文档加载器

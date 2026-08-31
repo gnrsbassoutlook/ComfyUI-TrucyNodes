@@ -82,25 +82,60 @@ class TrucyTxtBatchLoader:
         return (selected_content, selected_filename, merged_3[:1000000], merged_4[:1000000])
 
 # ======================================================================
-# 2. 文本预览与智能保存 (TrucyTxtPreviewAndSave) - 🍏 极简纯净版
+# 2. 文本预览与智能保存
+#    支持 force_trigger，也可以通过 text 输出接回 Loop
 # ======================================================================
 class TrucyTxtPreviewAndSave:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "save_to_file": ("BOOLEAN", {"default": False, "label_on": "Save ON", "label_off": "Save OFF"}),
-                "directory_path": ("STRING", {"default": "C:\\output"}),
-                "file_name": ("STRING", {"default": "scene_note"}),
-                "history_subfolder": ("STRING", {"default": "Pass_Prompt"}),
-                "encoding": (["UTF-8", "ANSI (GBK)"], {"default": "UTF-8"}),
+                "save_to_file": (
+                    "BOOLEAN",
+                    {
+                        "default": False,
+                        "label_on": "Save ON",
+                        "label_off": "Save OFF"
+                    }
+                ),
+                "directory_path": (
+                    "STRING",
+                    {
+                        "default": "C:\\output"
+                    }
+                ),
+                "file_name": (
+                    "STRING",
+                    {
+                        "default": "scene_note"
+                    }
+                ),
+                "history_subfolder": (
+                    "STRING",
+                    {
+                        "default": "Pass_Prompt"
+                    }
+                ),
+                "encoding": (
+                    ["UTF-8", "ANSI (GBK)"],
+                    {
+                        "default": "UTF-8"
+                    }
+                ),
             },
             "optional": {
+                # 实际需要保存或预览的文本
                 "text": (any_type,),
+
+                # 可连接 Loop index、计数器或任何每轮变化的值。
+                # 它只建立执行依赖，不参与文本和文件名处理。
+                "force_trigger": (any_type,),
             }
         }
-    
-    OUTPUT_NODE = True  # 告诉 ComfyUI 这是一个终端输出节点
+
+    # 表示这是一个具有保存/预览副作用的输出节点
+    OUTPUT_NODE = True
+
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("text",)
     FUNCTION = "process_text"
@@ -108,55 +143,153 @@ class TrucyTxtPreviewAndSave:
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
-        # 只要节点在主逻辑链上，NaN 就能保证它每次被强制执行
+        # 常规 ComfyUI 执行中避免结果被长期缓存。
+        # 对某些 Loop 插件无效时，由 force_trigger 提供明确的每轮依赖。
         return float("NaN")
 
-    def process_text(self, save_to_file, directory_path, file_name, history_subfolder, encoding, **kwargs):
+    def process_text(
+        self,
+        save_to_file,
+        directory_path,
+        file_name,
+        history_subfolder,
+        encoding,
+        **kwargs
+    ):
+        # 获取文本输入
         text = kwargs.get("text", "")
-        # 处理阻断器信号
-        text_str = str(text) if text is not None and type(text).__name__ != 'ExecutionBlocker' else ""
 
-        # --- 保存逻辑 ---
+        # 获取 force_trigger。
+        # 不需要参与后面的业务逻辑：
+        # 只要它连接到了上游节点，ComfyUI 就会建立依赖关系。
+        force_trigger = kwargs.get("force_trigger", None)
+
+        # 处理 ExecutionBlocker 或空输入
+        if (
+            text is None
+            or type(text).__name__ == "ExecutionBlocker"
+        ):
+            text_str = ""
+        else:
+            text_str = str(text)
+
+        # --------------------------------------------------------------
+        # 保存逻辑
+        # --------------------------------------------------------------
         if save_to_file and text_str:
             clean_dir = directory_path.strip().replace('"', '')
-            
-            try: 
-                os.makedirs(clean_dir, exist_ok=True)
-            except:
-                clean_dir = os.path.join(os.path.expanduser("~"), "Documents", "TrucyNodes_Output")
-                os.makedirs(clean_dir, exist_ok=True)
-                
-            base_name = file_name.strip()
-            if base_name.lower().endswith(".txt"): 
-                base_name = base_name[:-4]
-            
-            main_file_path = os.path.join(clean_dir, f"{base_name}.txt")
-            
+
             try:
-                # 复制备份机制（防止 Windows 文件锁）
+                os.makedirs(clean_dir, exist_ok=True)
+            except Exception as directory_error:
+                print(
+                    f"[TrucyNodes] 无法使用指定目录：{directory_error}"
+                )
+
+                clean_dir = os.path.join(
+                    os.path.expanduser("~"),
+                    "Documents",
+                    "TrucyNodes_Output"
+                )
+                os.makedirs(clean_dir, exist_ok=True)
+
+                print(
+                    f"[TrucyNodes] 已改用备用目录：{clean_dir}"
+                )
+
+            # 清理文件名
+            base_name = file_name.strip()
+
+            if not base_name:
+                base_name = "scene_note"
+
+            if base_name.lower().endswith(".txt"):
+                base_name = base_name[:-4]
+
+            main_file_path = os.path.join(
+                clean_dir,
+                f"{base_name}.txt"
+            )
+
+            try:
+                # 如果主文件已经存在，先复制进历史文件夹
                 if os.path.exists(main_file_path):
-                    archive_dir = os.path.join(clean_dir, history_subfolder.strip())
+                    clean_history_subfolder = history_subfolder.strip()
+
+                    if not clean_history_subfolder:
+                        clean_history_subfolder = "Pass_Prompt"
+
+                    archive_dir = os.path.join(
+                        clean_dir,
+                        clean_history_subfolder
+                    )
                     os.makedirs(archive_dir, exist_ok=True)
+
                     counter = 1
-                    backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
-                    
+                    backup_path = os.path.join(
+                        archive_dir,
+                        f"{base_name}_{counter}.txt"
+                    )
+
                     while os.path.exists(backup_path):
                         counter += 1
-                        backup_path = os.path.join(archive_dir, f"{base_name}_{counter}.txt")
-                    
-                    shutil.copy2(main_file_path, backup_path)
-                
-                # 写入新内容
-                file_enc = "utf-8" if encoding == "UTF-8" else "gbk"
-                with open(main_file_path, "w", encoding=file_enc) as f: 
-                    f.write(text_str)
-                print(f"[TrucyNodes] 文本已成功保存至: {main_file_path}")
-            
-            except Exception as e: 
-                print(f"\n❌ [TrucyNodes] 保存错误: {str(e)}\n")
-        
-        # 原封不动输出文本，方便连给后续节点或 Loop End
-        return {"ui": {"text": [text_str]}, "result": (text_str,)}
+                        backup_path = os.path.join(
+                            archive_dir,
+                            f"{base_name}_{counter}.txt"
+                        )
+
+                    # 复制旧版本，不移动主文件
+                    shutil.copy2(
+                        main_file_path,
+                        backup_path
+                    )
+
+                # 覆盖写入最新文本
+                file_enc = (
+                    "utf-8"
+                    if encoding == "UTF-8"
+                    else "gbk"
+                )
+
+                with open(
+                    main_file_path,
+                    "w",
+                    encoding=file_enc
+                ) as file:
+                    file.write(text_str)
+
+                # trigger 只用于日志显示，不参与保存逻辑
+                if (
+                    force_trigger is not None
+                    and type(force_trigger).__name__ != "ExecutionBlocker"
+                ):
+                    print(
+                        f"[TrucyNodes] 文本已成功保存至："
+                        f"{main_file_path} "
+                        f"[trigger={force_trigger}]"
+                    )
+                else:
+                    print(
+                        f"[TrucyNodes] 文本已成功保存至："
+                        f"{main_file_path}"
+                    )
+
+            except Exception as error:
+                print("\n" + "=" * 50)
+                print(
+                    f"❌ [TrucyNodes] 严重保存错误：{error}"
+                )
+                print("=" * 50 + "\n")
+
+        # 输出原始文本，可接到后续节点或 Loop 的循环参数
+        return {
+            "ui": {
+                "text": [text_str]
+            },
+            "result": (
+                text_str,
+            )
+        }
 
 # ======================================================================
 # 3. 文本符号嗅探器
