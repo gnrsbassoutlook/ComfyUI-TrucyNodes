@@ -6,7 +6,7 @@ import { applyTextReplacements } from "../../scripts/utils.js";
 const NODE_NAME = "TrucyVideoCombine";
 
 // 预览最大高度限制（像素），防止竖屏视频撑爆屏幕
-const MAX_PREVIEW_HEIGHT = 420;
+const MAX_PREVIEW_HEIGHT = 560;
 
 function chainCallback(object, property, callback) {
   if (object === undefined) return;
@@ -36,7 +36,7 @@ const convDict = {
 function useKVState(nodeType) {
   chainCallback(nodeType.prototype, "onNodeCreated", function () {
     chainCallback(this, "onConfigure", function (info) {
-      if (!this.widgets || typeof info.widgets_values !== "object") return;
+      if (!this.widgets || !info || typeof info.widgets_values !== "object") return;
       let widgetDict = info.widgets_values;
 
       if (info.widgets_values.length) {
@@ -49,14 +49,14 @@ function useKVState(nodeType) {
         }
       }
 
-      if (widgetDict.videopreview?.params?.force_size) {
+      if (widgetDict?.videopreview?.params?.force_size) {
         delete widgetDict.videopreview.params.force_size;
       }
 
       const inputs = {};
       for (const input of this.inputs || []) inputs[input.name] = input;
 
-      if (widgetDict.length === undefined) {
+      if (widgetDict && widgetDict.length === undefined) {
         for (const widget of this.widgets) {
           if (widget.type === "button") continue;
           if (widget.name in widgetDict) {
@@ -97,9 +97,9 @@ function useKVState(nodeType) {
 }
 
 function useVhsNodeBehavior(nodeType, nodeData) {
-  const allInputs = { ...nodeData.input?.required, ...nodeData.input?.optional };
+  const allInputs = { ...(nodeData?.input?.required || {}), ...(nodeData?.input?.optional || {}) };
   for (const input of Object.values(allInputs)) {
-    if (["INT", "FLOAT"].includes(input[0])) {
+    if (input && ["INT", "FLOAT"].includes(input[0])) {
       input[1] ??= {};
       input[1].widgetType ??= `VHS${input[0]}`;
     }
@@ -122,6 +122,7 @@ function useVhsNodeBehavior(nodeType, nodeData) {
 }
 
 function fitHeight(node) {
+  if (!node) return;
   const computedHeight = node.computeSize([node.size[0], node.size[1]])[1];
   node.setSize([node.size[0], computedHeight]);
   node.graph?.setDirtyCanvas(true);
@@ -162,9 +163,8 @@ function addVideoPreview(nodeType, isInput = true) {
 
     // 计算预览高度：增加 MAX_PREVIEW_HEIGHT 限制
     previewWidget.computeSize = function (width) {
-      if (this.aspectRatio && !this.parentEl.hidden) {
+      if (this.aspectRatio && !this.parentEl?.hidden) {
         let naturalHeight = (previewNode.size[0] - 20) / this.aspectRatio;
-        // 关键：限制高度最大不超过 MAX_PREVIEW_HEIGHT
         let height = Math.min(naturalHeight, MAX_PREVIEW_HEIGHT) + 10;
         if (!(height > 0)) height = 0;
         return [width, height + 10];
@@ -200,13 +200,11 @@ function addVideoPreview(nodeType, isInput = true) {
     previewWidget.videoEl.defaultMuted = true;
     previewWidget.videoEl.preload = "auto";
 
-    // 关键样式：高度限制且等比例自适应，不撑破窗口
     previewWidget.videoEl.style.maxWidth = "100%";
     previewWidget.videoEl.style.maxHeight = `${MAX_PREVIEW_HEIGHT}px`;
     previewWidget.videoEl.style.objectFit = "contain";
     previewWidget.videoEl.style.display = "block";
 
-    // 鼠标移入开声
     previewWidget.videoEl.addEventListener("mouseenter", () => {
       previewWidget.videoEl.defaultMuted = false;
       previewWidget.videoEl.muted = false;
@@ -215,7 +213,6 @@ function addVideoPreview(nodeType, isInput = true) {
       if (playPromise?.catch) playPromise.catch(() => {});
     });
 
-    // 鼠标移出静音
     previewWidget.videoEl.addEventListener("mouseleave", () => {
       previewWidget.videoEl.muted = true;
       previewWidget.videoEl.defaultMuted = true;
@@ -238,7 +235,7 @@ function addVideoPreview(nodeType, isInput = true) {
     });
 
     previewWidget.videoEl.addEventListener("error", () => {
-      previewWidget.parentEl.hidden = true;
+      if (previewWidget.parentEl) previewWidget.parentEl.hidden = true;
       fitHeight(this);
     });
 
@@ -252,7 +249,7 @@ function addVideoPreview(nodeType, isInput = true) {
     };
 
     previewWidget.updateSource = function (forceUpdate = false) {
-      if (!this.value.params?.filename) return;
+      if (!this.value?.params?.filename) return;
       const params = {
         ...this.value.params,
         timestamp: Date.now(),
@@ -262,7 +259,7 @@ function addVideoPreview(nodeType, isInput = true) {
       this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(params)}`);
       this.videoEl.autoplay = true;
       this.videoEl.loop = true;
-      this.parentEl.hidden = false;
+      if (this.parentEl) this.parentEl.hidden = false;
       this.videoEl.load();
       const playPromise = this.videoEl.play();
       if (playPromise?.catch) playPromise.catch(() => {});
@@ -279,28 +276,31 @@ function addFormatWidgets(nodeType) {
     let formatWidgetsCount = 0;
 
     chainCallback(formatWidget, "callback", (value) => {
-      const formats = LiteGraph.registered_node_types[this.type]?.nodeData?.input?.required?.format?.[1]?.formats;
+      const formats = LiteGraph.registered_node_types?.[this.type]?.nodeData?.input?.required?.format?.[1]?.formats 
+                   || LiteGraph.getNodeType?.(this.type)?.nodeData?.input?.required?.format?.[1]?.formats;
       const newWidgets = [];
       if (formats?.[value]) {
         for (const definition of formats[value]) {
           let type = definition[2]?.widgetType ?? definition[1];
           if (Array.isArray(type)) type = "COMBO";
-          app.widgets[type](this, definition[0], definition.slice(1), app);
+          app.widgets[type]?.(this, definition[0], definition.slice(1), app);
           const widget = this.widgets.pop();
-          widget.config = definition.slice(1);
-          newWidgets.push(widget);
+          if (widget) {
+            widget.config = definition.slice(1);
+            newWidgets.push(widget);
+          }
         }
       }
       const removed = this.widgets.splice(formatWidgetIndex, formatWidgetsCount, ...newWidgets);
       const newNames = new Set(newWidgets.map((w) => w.name));
       for (const widget of removed) {
         if (!newNames.has(widget.name)) {
-          const slot = this.inputs.findIndex((input) => input.name === widget.name);
+          const slot = this.inputs?.findIndex((input) => input.name === widget.name) ?? -1;
           if (slot >= 0) this.removeInput(slot);
         }
       }
       for (const widget of newWidgets) {
-        const existingInput = this.inputs.find((input) => input.name === widget.name);
+        const existingInput = this.inputs?.find((input) => input.name === widget.name);
         if (existingInput) {
           setWidgetConfig(existingInput, widget.config);
         } else {
@@ -323,6 +323,10 @@ app.registerExtension({
     chainCallback(nodeType.prototype, "onExecuted", function (message) {
       if (message?.gifs?.length && message.gifs[0]) {
         this.updateParameters?.(message.gifs[0], true);
+      } else if (message?.output?.gifs?.length && message.output.gifs[0]) {
+        this.updateParameters?.(message.output.gifs[0], true);
+      } else if (message?.output?.images?.length && message.output.images[0]) {
+        this.updateParameters?.(message.output.images[0], true);
       }
     });
     addVideoPreview(nodeType, false);

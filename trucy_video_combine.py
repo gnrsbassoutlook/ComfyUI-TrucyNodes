@@ -1,9 +1,11 @@
 """
 Trucy Video Combine Node
-基于肥猴大佬修改版 Video Combine 优化重构，集成：
+基于最新 Video Combine V2 深度优化：
 1. 单视频输出（无冗余 PNG / 无中间静音文件，完整注入 Workflow 元数据）
-2. 支持自定义保存路径 (custom_path)
-3. 增加绝对文件路径 (filepath) 文本输出
+2. 自动移除合成音频后烦人的 '-audio' 后缀，保持干净命名
+3. 支持自定义保存路径 (custom_path)
+4. 输出绝对文件路径 (filepath) 文本插槽
+5. 全输入带默认值的容错机制，防止前端报错插口丢失
 """
 
 import copy
@@ -88,26 +90,29 @@ class TrucyVideoCombine(io.ComfyNode):
 
         return io.Schema(
             node_id="TrucyVideoCombine",
-            display_name="Video-Combine-Trucy",
+            display_name="🚀 Video-Combine-Trucy",
             category="TrucyNodes/Video",
-            description="无冗余文件的视频保存节点，支持自定义路径并输出绝对文件路径。",
+            description="无冗余文件的视频保存节点，去-audio后缀，支持自定义路径并输出绝对文件路径。",
             search_aliases=["video combine", "trucy video", "保存视频", "视频合并"],
             inputs=[
                 io.MultiType.Input(io.Image.Input("images"), [io.Image, io.Latent]),
                 io.Audio.Input("audio", optional=True),
                 VHSBatchManager.Input("meta_batch", display_name="meta_batch", optional=True),
                 io.Vae.Input("vae", optional=True),
-                io.Float.Input("frame_rate", default=8.0, min=1.0, step=1.0),
-                io.Int.Input("loop_count", default=0, min=0, max=100, step=1),
-                io.String.Input("filename_prefix", default="AnimateDiff"),
-                io.String.Input("custom_path", default="", display_name="custom_path (optional)"),
+                # 借鉴肥猴 v2.9.4：使用带默认值的 optional + socketless，杜绝缺失输入报错
+                io.Float.Input("frame_rate", default=8.0, min=1.0, step=1.0, optional=True, socketless=True),
+                io.Int.Input("loop_count", default=0, min=0, max=100, step=1, optional=True, socketless=True),
+                io.String.Input("filename_prefix", default="AnimateDiff", optional=True, socketless=True),
+                io.String.Input("custom_path", default="", display_name="custom_path (optional)", optional=True, socketless=True),
                 io.Combo.Input(
                     "format",
                     options=["image/gif", "image/webp"] + ffmpeg_formats,
                     extra_dict={"formats": format_widgets},
+                    optional=True,
+                    socketless=True,
                 ),
-                io.Boolean.Input("pingpong", default=False),
-                io.Boolean.Input("save_output", default=True),
+                io.Boolean.Input("pingpong", default=False, optional=True, socketless=True),
+                io.Boolean.Input("save_output", default=True, optional=True, socketless=True),
             ],
             outputs=[
                 VHSFilenames.Output("Filenames", display_name="视频"),
@@ -164,12 +169,12 @@ class TrucyVideoCombine(io.ComfyNode):
     def execute(
         cls,
         images,
-        frame_rate,
-        loop_count,
-        filename_prefix,
-        format,
-        pingpong,
-        save_output,
+        frame_rate=8.0,
+        loop_count=0,
+        filename_prefix="AnimateDiff",
+        format="image/gif",
+        pingpong=False,
+        save_output=True,
         custom_path="",
         audio=None,
         meta_batch=None,
@@ -206,9 +211,13 @@ class TrucyVideoCombine(io.ComfyNode):
             return io.NodeOutput((save_output, []), "", ui=ui)
 
         final_path = output_files[-1]
-        cls._embed_metadata(final_path, cls._metadata(cls.hidden.prompt, original_extra))
 
-        # 清理原版生成的中间无声视频等非最终文件
+        # 1. 嵌入工作流元数据
+        video_extensions = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
+        if os.path.splitext(final_path)[1].lower() in video_extensions:
+            cls._embed_metadata(final_path, cls._metadata(cls.hidden.prompt, original_extra))
+
+        # 2. 清理原版生成的中间无声视频等非最终文件
         for path in output_files[:-1]:
             try:
                 if os.path.isfile(path):
@@ -216,38 +225,42 @@ class TrucyVideoCombine(io.ComfyNode):
             except OSError:
                 pass
 
-        # --- 自定义保存路径支持 ---
+        # 3. 彻底清除烦人的 '-audio' 后缀
+        file_dir, file_name = os.path.split(final_path)
+        name_stem, ext = os.path.splitext(file_name)
+        if name_stem.endswith("-audio"):
+            clean_stem = name_stem[:-6]
+            clean_name = f"{clean_stem}{ext}"
+            clean_path = os.path.join(file_dir, clean_name)
+            # 如果目标已存在（例如同名），先移除
+            if os.path.exists(clean_path):
+                try: os.remove(clean_path)
+                except OSError: pass
+            try:
+                os.rename(final_path, clean_path)
+                final_path = clean_path
+                file_name = clean_name
+            except Exception as e:
+                print(f"[TrucyVideoCombine] 重命名去除 -audio 失败: {e}")
+
+        # 4. 自定义路径处理
         resolved_output_path = final_path
-        clean_custom = custom_path.strip().replace('"', "")
+        clean_custom = (custom_path or "").strip().replace('"', "")
         if clean_custom:
             try:
                 target_dir = os.path.abspath(clean_custom)
                 os.makedirs(target_dir, exist_ok=True)
-                dest_file = os.path.join(target_dir, os.path.basename(final_path))
-                shutil.copy2(final_path, dest_file)
-                resolved_output_path = dest_file
-                print(f"[TrucyNodes] Video successfully saved to custom path: {dest_file}")
+                target_file = os.path.join(target_dir, file_name)
+                shutil.copy2(final_path, target_file)
+                resolved_output_path = target_file
             except Exception as e:
-                print(f"[TrucyNodes] Warning: Failed to copy to custom_path '{clean_custom}': {e}")
+                print(f"[TrucyVideoCombine] 复制到自定义路径失败: {e}")
 
-        preview = ui.get("gifs", [{}])[0]
-        if preview:
-            preview.pop("workflow", None)
-            preview["filename"] = os.path.basename(final_path)
-            preview["fullpath"] = resolved_output_path
+        # 同步更新 UI 返回中的文件名显示（防止前端找不到预览）
+        clean_final_name = os.path.basename(final_path)
+        if "gifs" in ui:
+            for item in ui["gifs"]:
+                if "filename" in item and item["filename"].endswith(f"-audio{ext}"):
+                    item["filename"] = clean_final_name
 
-        # 同时返回 视频结构元组 和 字符串格式的完整文件路径
-        return io.NodeOutput(
-            (save_output, [final_path]),
-            os.path.abspath(resolved_output_path),
-            ui=ui,
-        )
-
-
-NODE_CLASS_MAPPINGS = {
-    "TrucyVideoCombine": TrucyVideoCombine,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyVideoCombine": "Video-Combine-Trucy",
-}
+        return io.NodeOutput((save_output, [final_path]), resolved_output_path, ui=ui)
