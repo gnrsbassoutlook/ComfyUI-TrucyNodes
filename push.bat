@@ -2,12 +2,12 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 echo ==========================================
-echo " 🚀 ComfyUI‑TrucyNodes GitHub 自动推送脚本"
+echo " 🚀 ComfyUI‑TrucyNodes GitHub 自动推送脚本(HTTPS模式)"
 echo ==========================================
-:: 优先SSH地址，Windows需要配置Git SSH密钥
-set REMOTE_SSH=git@github.com:gnrsbassoutlook/ComfyUI-TrucyNodes.git
-:: 如果不想用SSH，取消下一行注释，注释上面一行
-:: set REMOTE_SSH=https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes.git
+:: ========== HTTPS模式，不需要SSH密钥 ==========
+:: SSH地址已注释，本脚本使用https + PAT token
+:: set REMOTE_SSH=git@github.com:gnrsbassoutlook/ComfyUI-TrucyNodes.git
+set REMOTE_SSH=https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes.git
 
 if not exist ".git" (
     echo 📦 正在初始化 Git 仓库...
@@ -58,10 +58,12 @@ if %errorlevel% equ 0 (
     echo 🎉 推送成功！代码已同步至 GitHub。
 ) else (
     echo.
-    echo ⚠️ 推送可能遇到冲突，正在尝试拉取合并后重新推送...
+    echo ⚠️ 推送失败，尝试拉取远程最新代码再推送...
     git pull origin main --rebase
     if %errorlevel% neq 0 (
-        echo ❌ rebase合并失败，请手动解决冲突！
+        echo ❌ 操作失败。
+        echo 提示：如果报错403/认证失败，请检查你的PAT Token；
+        echo 如果是真实代码冲突，需要你手动解决冲突。
     ) else (
         git push -u origin main
     )
