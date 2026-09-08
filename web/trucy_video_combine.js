@@ -5,332 +5,554 @@ import { applyTextReplacements } from "../../scripts/utils.js";
 
 const NODE_NAME = "TrucyVideoCombine";
 
-// 预览最大高度限制（像素），防止竖屏视频撑爆屏幕
-const MAX_PREVIEW_HEIGHT = 560;
-
 function chainCallback(object, property, callback) {
-  if (object === undefined) return;
-  if (property in object && object[property]) {
-    const original = object[property];
-    object[property] = function () {
-      const result = original.apply(this, arguments);
-      return callback.apply(this, arguments) ?? result;
-    };
-  } else {
-    object[property] = callback;
-  }
+    if (!object) return;
+    if (property in object && object[property]) {
+        const original = object[property];
+        object[property] = function () {
+            const result = original.apply(this, arguments);
+            const callbackResult = callback.apply(this, arguments);
+            return callbackResult ?? result;
+        };
+    } else {
+        object[property] = callback;
+    }
 }
 
 const convDict = {
-  [NODE_NAME]: [
-    "frame_rate",
-    "loop_count",
-    "filename_prefix",
-    "custom_path",
-    "format",
-    "pingpong",
-    "save_output",
-  ],
+    [NODE_NAME]: [
+        "frame_rate",
+        "loop_count",
+        "filename_prefix",
+        "format",
+        "pingpong",
+        "save_output",
+        "custom_path",
+    ],
 };
 
+function roundVhsNumber(value, precision) {
+    const fixed = Number(value).toFixed(precision);
+    const dot = fixed.indexOf(".");
+    if (dot < 0) return fixed;
+    let end = fixed.length - 1;
+    while (end > dot && fixed[end] === "0") end--;
+    if (end === dot) end--;
+    return fixed.slice(0, end + 1);
+}
+
+function clampVhsNumber(value, options, integer) {
+    let result = Number(value);
+    if (!Number.isFinite(result)) result = options.default ?? 0;
+    if (options.min != null) result = Math.max(options.min, result);
+    if (options.max != null) result = Math.min(options.max, result);
+    if (integer) {
+        const step = options.step ?? 1;
+        const offset = options.mod ?? 0;
+        result = Math.round((result - offset) / step) * step + offset;
+    } else if (options.round) {
+        result = Math.round((result + Number.EPSILON) / options.round) * options.round;
+    }
+    return result;
+}
+
+function drawVhsNumber(ctx, node, widgetWidth, y, height) {
+    const margin = 15;
+    const showText = LiteGraph.vueNodesMode || app.canvas.ds.scale >= (app.canvas.low_quality_zoom_threshold ?? 0.5);
+
+    ctx.strokeStyle = LiteGraph.WIDGET_OUTLINE_COLOR;
+    ctx.fillStyle = LiteGraph.WIDGET_BGCOLOR;
+    ctx.beginPath();
+    if (showText) {
+        ctx.roundRect(margin, y, widgetWidth - margin * 2, height, [height * 0.5]);
+    } else {
+        ctx.rect(margin, y, widgetWidth - margin * 2, height);
+    }
+    ctx.fill();
+
+    if (!showText) return;
+    if (!this.disabled) ctx.stroke();
+
+    ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+    if (!this.disabled) {
+        ctx.beginPath();
+        ctx.moveTo(margin + 16, y + 5);
+        ctx.lineTo(margin + 6, y + height * 0.5);
+        ctx.lineTo(margin + 16, y + height - 5);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(widgetWidth - margin - 16, y + 5);
+        ctx.lineTo(widgetWidth - margin - 6, y + height * 0.5);
+        ctx.lineTo(widgetWidth - margin - 16, y + height - 5);
+        ctx.fill();
+    }
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = LiteGraph.WIDGET_SECONDARY_TEXT_COLOR;
+    ctx.fillText(this.label || this.name, margin * 2 + 5, y + height * 0.7);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = LiteGraph.WIDGET_TEXT_COLOR;
+    ctx.fillText(this.displayValue(), widgetWidth - margin * 2 - 20, y + height * 0.7);
+}
+
+function setVhsNumberValue(widget, node, value) {
+    widget.callback(value);
+    node.graph?.setDirtyCanvas(true);
+}
+
+function mouseVhsNumber(event, [x], node) {
+    const widgetWidth = this.width || node.size[0];
+    const margin = 15;
+    const step = this.options.step || 1;
+    let direction = 0;
+
+    if (x > margin + 6 && x < margin + 16) {
+        direction = -1;
+    } else if (x > widgetWidth - margin - 16 && x < widgetWidth - margin - 6) {
+        direction = 1;
+    }
+
+    if (event.type === "pointermove" && event.deltaX) {
+        setVhsNumberValue(this, node, this.value + event.deltaX * step);
+    } else if (event.type === "pointerdown" && direction) {
+        setVhsNumberValue(this, node, this.value + direction * step);
+    } else if (event.type === "pointerup" && event.click_time < 200 && !direction) {
+        const dialog = app.canvas.prompt(
+            "Value",
+            this.value,
+            (value) => setVhsNumberValue(this, node, value),
+            event
+        );
+        const input = dialog?.querySelector?.(".value");
+        input?.addEventListener("keydown", (keyEvent) => {
+            if (keyEvent.key !== "Tab") return;
+            keyEvent.preventDefault();
+            setVhsNumberValue(this, node, input.value);
+            dialog.close();
+        });
+    }
+    return true;
+}
+
+function createVhsNumberWidget(node, inputName, inputData, integer) {
+    const options = Object.assign({}, inputData?.[1] ?? {});
+    const widget = {
+        name: inputName,
+        type: integer ? "VHSINT" : "VHSFLOAT",
+        value: options.default ?? 0,
+        options,
+        config: inputData,
+        draw: drawVhsNumber,
+        mouse: mouseVhsNumber,
+        computeSize(width) {
+            return [width, 20];
+        },
+        callback(value) {
+            this.value = clampVhsNumber(value, this.options, integer);
+        },
+        displayValue() {
+            if (integer) return String(this.value | 0);
+            return roundVhsNumber(this.value, this.options.precision ?? 3);
+        },
+    };
+    (node.widgets ??= []).push(widget);
+    return widget;
+}
+
 function useKVState(nodeType) {
-  chainCallback(nodeType.prototype, "onNodeCreated", function () {
-    chainCallback(this, "onConfigure", function (info) {
-      if (!this.widgets || !info || typeof info.widgets_values !== "object") return;
-      let widgetDict = info.widgets_values;
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        chainCallback(this, "onConfigure", function (info) {
+            if (!this.widgets || !info || info.widgets_values == null) return;
+            let widgetDict = info.widgets_values;
 
-      if (info.widgets_values.length) {
-        const convList = convDict[this.type];
-        if (convList && info.widgets_values.length >= convList.length) {
-          widgetDict = {};
-          for (let index = 0; index < convList.length; index++) {
-            if (convList[index]) widgetDict[convList[index]] = info.widgets_values[index];
-          }
-        }
-      }
-
-      if (widgetDict?.videopreview?.params?.force_size) {
-        delete widgetDict.videopreview.params.force_size;
-      }
-
-      const inputs = {};
-      for (const input of this.inputs || []) inputs[input.name] = input;
-
-      if (widgetDict && widgetDict.length === undefined) {
-        for (const widget of this.widgets) {
-          if (widget.type === "button") continue;
-          if (widget.name in widgetDict) {
-            widget.value = widgetDict[widget.name];
-            widget.callback?.(widget.value);
-          } else {
-            const nodeInputs = LiteGraph.getNodeType(this.type)?.nodeData?.input;
-            let initialValue = null;
-            if (nodeInputs?.required?.hasOwnProperty(widget.name)) {
-              const cfg = nodeInputs.required[widget.name];
-              if (cfg[1]?.hasOwnProperty("default")) initialValue = cfg[1].default;
-              else if (Array.isArray(cfg[0]) && cfg[0].length) initialValue = cfg[0][0];
-            } else if (nodeInputs?.optional?.hasOwnProperty(widget.name)) {
-              const cfg = nodeInputs.optional[widget.name];
-              if (cfg[1]?.hasOwnProperty("default")) initialValue = cfg[1].default;
-              else if (Array.isArray(cfg[0]) && cfg[0].length) initialValue = cfg[0][0];
+            if (Array.isArray(info.widgets_values)) {
+                const convList = convDict[this.type] ?? [];
+                widgetDict = {};
+                const count = Math.min(info.widgets_values.length, convList.length);
+                for (let index = 0; index < count; index++) {
+                    const name = convList[index];
+                    if (name) widgetDict[name] = info.widgets_values[index];
+                }
             }
-            if (initialValue !== null && initialValue !== undefined) {
-              widget.value = initialValue;
-              widget.callback?.(widget.value);
-            }
-          }
-          if (widget.name in inputs && widget.config) {
-            setWidgetConfig(inputs[widget.name], widget.config);
-          }
-        }
-      }
-    });
 
-    chainCallback(this, "onSerialize", function (info) {
-      info.widgets_values = {};
-      if (!this.widgets) return;
-      for (const widget of this.widgets) {
-        info.widgets_values[widget.name] = widget.value;
-      }
+            if (widgetDict.videopreview?.params?.force_size) {
+                delete widgetDict.videopreview.params.force_size;
+            }
+
+            const inputs = {};
+            for (const input of this.inputs ?? []) {
+                inputs[input.name] = input;
+            }
+
+            for (const widget of this.widgets) {
+                if (widget.type === "button") continue;
+                if (Object.prototype.hasOwnProperty.call(widgetDict, widget.name)) {
+                    widget.value = widgetDict[widget.name];
+                    widget.callback?.(widget.value);
+                } else {
+                    const nodeTypeInfo = LiteGraph.getNodeType(this.type);
+                    const nodeInputs = nodeTypeInfo?.nodeData?.input;
+                    let initialValue = null;
+
+                    if (nodeInputs?.required && Object.prototype.hasOwnProperty.call(nodeInputs.required, widget.name)) {
+                        const config = nodeInputs.required[widget.name];
+                        if (config[1] && Object.prototype.hasOwnProperty.call(config[1], "default")) {
+                            initialValue = config[1].default;
+                        } else if (config[0]?.length) {
+                            initialValue = config[0][0];
+                        }
+                    } else if (nodeInputs?.optional && Object.prototype.hasOwnProperty.call(nodeInputs.optional, widget.name)) {
+                        const config = nodeInputs.optional[widget.name];
+                        if (config[1] && Object.prototype.hasOwnProperty.call(config[1], "default")) {
+                            initialValue = config[1].default;
+                        } else if (config[0]?.length) {
+                            initialValue = config[0][0];
+                        }
+                    }
+
+                    if (initialValue !== null) {
+                        widget.value = initialValue;
+                        widget.callback?.(widget.value);
+                    }
+                }
+
+                if (widget.name in inputs && widget.config) {
+                    setWidgetConfig(inputs[widget.name], widget.config);
+                }
+            }
+        });
+
+        chainCallback(this, "onSerialize", function (info) {
+            info.widgets_values = {};
+            if (!this.widgets) return;
+            for (const widget of this.widgets) {
+                info.widgets_values[widget.name] = widget.value;
+            }
+        });
     });
-  });
 }
 
 function useVhsNodeBehavior(nodeType, nodeData) {
-  const allInputs = { ...(nodeData?.input?.required || {}), ...(nodeData?.input?.optional || {}) };
-  for (const input of Object.values(allInputs)) {
-    if (input && ["INT", "FLOAT"].includes(input[0])) {
-      input[1] ??= {};
-      input[1].widgetType ??= `VHS${input[0]}`;
-    }
-  }
-
-  chainCallback(nodeType.prototype, "onNodeCreated", function () {
-    const originalAddInput = this.addInput;
-    this.addInput = function (name, type, options) {
-      if (options?.widget) {
-        const widget = this.widgets?.find((item) => item.name === name);
-        if (widget?.config) {
-          type = widget.config[0];
-          if (type === "FLOAT") type = "FLOAT,INT";
-          setWidgetConfig(options, widget.config);
+    for (const input of Object.values({ ...nodeData.input?.required, ...nodeData.input?.optional })) {
+        if (["INT", "FLOAT"].includes(input[0])) {
+            input[1] ??= {};
+            input[1].widgetType = input[1].widgetType ?? `VHS${input[0]}`;
         }
-      }
-      return originalAddInput.apply(this, [name, type, options]);
-    };
-  });
+    }
+
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        const originalAddInput = this.addInput;
+        this.addInput = function (name, type, options) {
+            if (options?.widget) {
+                const widget = this.widgets.find((item) => item.name === name);
+                if (widget?.config) {
+                    type = widget.config[0];
+                    if (type === "FLOAT") type = "FLOAT,INT";
+                    setWidgetConfig(options, widget.config);
+                }
+            }
+            return originalAddInput.apply(this, [name, type, options]);
+        };
+    });
 }
 
 function fitHeight(node) {
-  if (!node) return;
-  const computedHeight = node.computeSize([node.size[0], node.size[1]])[1];
-  node.setSize([node.size[0], computedHeight]);
-  node.graph?.setDirtyCanvas(true);
+    node.setSize([node.size[0], node.computeSize([node.size[0], node.size[1]])[1]]);
+    node.graph?.setDirtyCanvas(true);
 }
 
-function addVAEInputToggle(nodeType) {
-  chainCallback(nodeType.prototype, "onConnectionsChange", function (contype, slot, isConnected, linkInfo) {
-    if (contype !== LiteGraph.INPUT || slot !== 3 || this.inputs?.[3]?.type !== "VAE") return;
-    if (isConnected && linkInfo) {
-      this.inputs[0].type = "LATENT";
-    } else {
-      this.inputs[0].type = "IMAGE";
-    }
-  });
+function allowDragFromWidget(widget) {
+    widget.onPointerDown = function (pointer, node) {
+        pointer.onDragStart = () => {
+            app.canvas.emitBeforeChange();
+            app.canvas.graph?.beforeChange();
+            app.canvas.processSelect(node, pointer.eDown, true);
+            app.canvas.isDragging = true;
+        };
+        pointer.onDragEnd = () => {
+            app.canvas.isDragging = false;
+            app.canvas.graph?.afterChange();
+            app.canvas.emitAfterChange();
+            app.canvas.dirty_canvas = true;
+            app.canvas.dirty_bgcanvas = true;
+        };
+        app.canvas.dirty_canvas = true;
+        return true;
+    };
 }
 
 function addDateFormatting(nodeType, field) {
-  chainCallback(nodeType.prototype, "onNodeCreated", function () {
-    const widget = this.widgets?.find((item) => item.name === field);
-    if (widget) {
-      widget.serializeValue = () => applyTextReplacements(app, widget.value);
-    }
-  });
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        const widget = this.widgets.find((item) => item.name === field);
+        if (widget) {
+            widget.serializeValue = () => applyTextReplacements(app, widget.value);
+        }
+    });
 }
 
-// 视频预览功能（加入最大高度限制与居中缩放）
-function addVideoPreview(nodeType, isInput = true) {
-  chainCallback(nodeType.prototype, "onNodeCreated", function () {
-    const element = document.createElement("div");
-    const previewNode = this;
+function addVideoPreview(nodeType) {
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        const previewNode = this;
+        const element = document.createElement("div");
 
-    const previewWidget = this.addDOMWidget("videopreview", "preview", element, {
-      serialize: false,
-      hideOnZoom: false,
-      getValue() { return element.value; },
-      setValue(value) { element.value = value; },
+        const previewWidget = this.addDOMWidget("videopreview", "preview", element, {
+            serialize: false,
+            hideOnZoom: false,
+            getValue() {
+                return element.value;
+            },
+            setValue(value) {
+                element.value = value;
+            },
+        });
+
+        allowDragFromWidget(previewWidget);
+
+        previewWidget.computeSize = function (width) {
+            if (this.aspectRatio && !this.parentEl.hidden) {
+                let height = (previewNode.size[0] - 20) / this.aspectRatio + 10;
+                if (!(height > 0)) height = 0;
+                this.computedHeight = height + 10;
+                return [width, height];
+            }
+            return [width, -4];
+        };
+
+        element.style.width = "100%";
+        previewWidget.value = { hidden: false, paused: false, params: {}, muted: true };
+        previewWidget.parentEl = document.createElement("div");
+        previewWidget.parentEl.className = "vhs_preview";
+        previewWidget.parentEl.style.width = "100%";
+        element.appendChild(previewWidget.parentEl);
+
+        previewWidget.videoEl = document.createElement("video");
+        previewWidget.videoEl.controls = false;
+        previewWidget.videoEl.loop = true;
+        previewWidget.videoEl.muted = true;
+        previewWidget.videoEl.style.width = "100%";
+
+        previewWidget.videoEl.addEventListener("loadedmetadata", () => {
+            previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
+            fitHeight(previewNode);
+        });
+
+        previewWidget.videoEl.addEventListener("error", () => {
+            previewWidget.parentEl.hidden = true;
+            fitHeight(previewNode);
+        });
+
+        previewWidget.videoEl.onmouseenter = () => {
+            previewWidget.videoEl.muted = previewWidget.value.muted;
+        };
+        previewWidget.videoEl.onmouseleave = () => {
+            previewWidget.videoEl.muted = true;
+        };
+        previewWidget.parentEl.appendChild(previewWidget.videoEl);
+
+        let timeout = null;
+        previewNode.updateParameters = (params, forceUpdate) => {
+            if (!previewWidget.value || typeof previewWidget.value !== "object") {
+                previewWidget.value = {};
+            }
+            if (!previewWidget.value.params) {
+                previewWidget.value.params = {};
+            }
+
+            const changed = Object.entries(params).some(([key, value]) => previewWidget.value.params[key] !== value);
+            if (!changed) return;
+
+            Object.assign(previewWidget.value.params, params);
+            if (!forceUpdate && app.ui.settings.getSettingValue("VHS.AdvancedPreviews") === "Never") {
+                return;
+            }
+
+            if (timeout) clearTimeout(timeout);
+            if (forceUpdate) {
+                previewWidget.updateSource();
+            } else {
+                timeout = setTimeout(() => previewWidget.updateSource(), 100);
+            }
+        };
+
+        previewWidget.updateSource = function () {
+            const params = this.value?.params;
+            if (!params) return;
+
+            const query = { ...params, timestamp: Date.now() };
+            const format = query.format || "";
+            if (format.startsWith("video/") || format === "folder") {
+                this.parentEl.hidden = this.value.hidden;
+                this.videoEl.autoplay = !this.value.paused && !this.value.hidden;
+                this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(query)}`);
+                this.videoEl.hidden = false;
+            }
+            this.doQuery?.();
+        };
+
+        previewWidget.doQuery = async function () {
+            const params = this.value?.params;
+            if (!params?.filename) return;
+            try {
+                const response = await fetch(api.apiURL(`/feihou-vhs/queryvideo?${new URLSearchParams(params)}`));
+                previewNode.video_query = await response.json();
+            } catch (_) {}
+        };
+
+        previewWidget.callback = previewWidget.updateSource;
     });
-
-    // 计算预览高度：增加 MAX_PREVIEW_HEIGHT 限制
-    previewWidget.computeSize = function (width) {
-      if (this.aspectRatio && !this.parentEl?.hidden) {
-        let naturalHeight = (previewNode.size[0] - 20) / this.aspectRatio;
-        let height = Math.min(naturalHeight, MAX_PREVIEW_HEIGHT) + 10;
-        if (!(height > 0)) height = 0;
-        return [width, height + 10];
-      }
-      return [width, -4];
-    };
-
-    previewWidget.value = {
-      hidden: false,
-      paused: false,
-      params: {},
-      muted: false,
-    };
-
-    previewWidget.parentEl = document.createElement("div");
-    previewWidget.parentEl.className = "vhs_preview";
-    previewWidget.parentEl.style.width = "100%";
-    previewWidget.parentEl.style.maxHeight = `${MAX_PREVIEW_HEIGHT}px`;
-    previewWidget.parentEl.style.display = "flex";
-    previewWidget.parentEl.style.justifyContent = "center";
-    previewWidget.parentEl.style.alignItems = "center";
-    previewWidget.parentEl.style.overflow = "hidden";
-    previewWidget.parentEl.style.background = "rgba(0,0,0,0.3)";
-    previewWidget.parentEl.style.borderRadius = "4px";
-    element.appendChild(previewWidget.parentEl);
-
-    previewWidget.videoEl = document.createElement("video");
-    previewWidget.videoEl.controls = false;
-    previewWidget.videoEl.loop = true;
-    previewWidget.videoEl.autoplay = true;
-    previewWidget.videoEl.playsInline = true;
-    previewWidget.videoEl.muted = true;
-    previewWidget.videoEl.defaultMuted = true;
-    previewWidget.videoEl.preload = "auto";
-
-    previewWidget.videoEl.style.maxWidth = "100%";
-    previewWidget.videoEl.style.maxHeight = `${MAX_PREVIEW_HEIGHT}px`;
-    previewWidget.videoEl.style.objectFit = "contain";
-    previewWidget.videoEl.style.display = "block";
-
-    previewWidget.videoEl.addEventListener("mouseenter", () => {
-      previewWidget.videoEl.defaultMuted = false;
-      previewWidget.videoEl.muted = false;
-      previewWidget.videoEl.volume = 1.0;
-      const playPromise = previewWidget.videoEl.play();
-      if (playPromise?.catch) playPromise.catch(() => {});
-    });
-
-    previewWidget.videoEl.addEventListener("mouseleave", () => {
-      previewWidget.videoEl.muted = true;
-      previewWidget.videoEl.defaultMuted = true;
-    });
-
-    previewWidget.videoEl.addEventListener("loadedmetadata", () => {
-      const vw = previewWidget.videoEl.videoWidth;
-      const vh = previewWidget.videoEl.videoHeight;
-      if (vw > 0 && vh > 0) {
-        previewWidget.aspectRatio = vw / vh;
-      }
-      fitHeight(this);
-    });
-
-    previewWidget.videoEl.addEventListener("loadeddata", () => {
-      previewWidget.videoEl.muted = true;
-      previewWidget.videoEl.defaultMuted = true;
-      const playPromise = previewWidget.videoEl.play();
-      if (playPromise?.catch) playPromise.catch(() => {});
-    });
-
-    previewWidget.videoEl.addEventListener("error", () => {
-      if (previewWidget.parentEl) previewWidget.parentEl.hidden = true;
-      fitHeight(this);
-    });
-
-    previewWidget.parentEl.appendChild(previewWidget.videoEl);
-
-    this.updateParameters = (params, forceUpdate) => {
-      if (!params) return;
-      if (!previewWidget.value.params) previewWidget.value.params = {};
-      Object.assign(previewWidget.value.params, params);
-      previewWidget.updateSource(forceUpdate);
-    };
-
-    previewWidget.updateSource = function (forceUpdate = false) {
-      if (!this.value?.params?.filename) return;
-      const params = {
-        ...this.value.params,
-        timestamp: Date.now(),
-      };
-      this.videoEl.muted = true;
-      this.videoEl.defaultMuted = true;
-      this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(params)}`);
-      this.videoEl.autoplay = true;
-      this.videoEl.loop = true;
-      if (this.parentEl) this.parentEl.hidden = false;
-      this.videoEl.load();
-      const playPromise = this.videoEl.play();
-      if (playPromise?.catch) playPromise.catch(() => {});
-      fitHeight(previewNode);
-    };
-  });
 }
 
 function addFormatWidgets(nodeType) {
-  chainCallback(nodeType.prototype, "onNodeCreated", function () {
-    const formatWidget = this.widgets?.find((w) => w.name === "format");
-    if (!formatWidget) return;
-    const formatWidgetIndex = this.widgets.indexOf(formatWidget) + 1;
-    let formatWidgetsCount = 0;
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        let formatWidget = null;
+        let formatWidgetIndex = -1;
 
-    chainCallback(formatWidget, "callback", (value) => {
-      const formats = LiteGraph.registered_node_types?.[this.type]?.nodeData?.input?.required?.format?.[1]?.formats 
-                   || LiteGraph.getNodeType?.(this.type)?.nodeData?.input?.required?.format?.[1]?.formats;
-      const newWidgets = [];
-      if (formats?.[value]) {
-        for (const definition of formats[value]) {
-          let type = definition[2]?.widgetType ?? definition[1];
-          if (Array.isArray(type)) type = "COMBO";
-          app.widgets[type]?.(this, definition[0], definition.slice(1), app);
-          const widget = this.widgets.pop();
-          if (widget) {
-            widget.config = definition.slice(1);
-            newWidgets.push(widget);
-          }
+        for (let index = 0; index < this.widgets.length; index++) {
+            if (this.widgets[index].name === "format") {
+                formatWidget = this.widgets[index];
+                formatWidgetIndex = index + 1;
+                break;
+            }
         }
-      }
-      const removed = this.widgets.splice(formatWidgetIndex, formatWidgetsCount, ...newWidgets);
-      const newNames = new Set(newWidgets.map((w) => w.name));
-      for (const widget of removed) {
-        if (!newNames.has(widget.name)) {
-          const slot = this.inputs?.findIndex((input) => input.name === widget.name) ?? -1;
-          if (slot >= 0) this.removeInput(slot);
-        }
-      }
-      for (const widget of newWidgets) {
-        const existingInput = this.inputs?.find((input) => input.name === widget.name);
-        if (existingInput) {
-          setWidgetConfig(existingInput, widget.config);
-        } else {
-          this.addInput(widget.name, widget.config[0], { widget: { name: widget.name } });
-        }
-      }
-      fitHeight(this);
-      formatWidgetsCount = newWidgets.length;
+        if (!formatWidget) return;
+
+        let formatWidgetsCount = 0;
+
+        chainCallback(formatWidget, "callback", (value) => {
+            const nodeInputs = LiteGraph.registered_node_types[this.type]?.nodeData?.input;
+            const formats = (nodeInputs?.required?.format ?? nodeInputs?.optional?.format)?.[1]?.formats;
+            const definitions = formats?.[value] ?? [];
+            const newWidgets = [];
+
+            for (const definition of definitions) {
+                let type = definition[2]?.widgetType ?? definition[1];
+                if (Array.isArray(type)) type = "COMBO";
+                if (!app.widgets[type]) continue;
+
+                app.widgets[type](this, definition[0], definition.slice(1), app);
+                const widget = this.widgets.pop();
+                widget.config = definition.slice(1);
+                newWidgets.push(widget);
+            }
+
+            const removed = this.widgets.splice(formatWidgetIndex, formatWidgetsCount, ...newWidgets);
+            const newNames = new Set(newWidgets.map((widget) => widget.name));
+
+            for (const widget of removed) {
+                widget?.onRemove?.();
+                if (newNames.has(widget?.name)) continue;
+                const slot = this.inputs.findIndex((input) => input.name === widget?.name);
+                if (slot >= 0) this.removeInput(slot);
+            }
+
+            for (const widget of newWidgets) {
+                const existingInput = this.inputs.find((input) => input.name === widget.name);
+                if (existingInput) {
+                    setWidgetConfig(existingInput, widget.config);
+                } else {
+                    this.addInput(widget.name, widget.config[0], { widget: { name: widget.name } });
+                }
+            }
+
+            fitHeight(this);
+            formatWidgetsCount = newWidgets.length;
+        });
     });
-  });
+}
+
+function addPreviewOptions(nodeType) {
+    chainCallback(nodeType.prototype, "getExtraMenuOptions", function (_, options) {
+        const previewWidget = this.widgets?.find((widget) => widget.name === "videopreview");
+        if (!previewWidget) return;
+
+        const fullpath = previewWidget.value?.params?.fullpath;
+        if (fullpath) {
+            options.unshift({
+                content: "Copy output filepath",
+                callback: async () => {
+                    await navigator.clipboard.writeText(fullpath);
+                },
+            });
+        }
+    });
+}
+
+function addVAEInputToggle(nodeType) {
+    chainCallback(nodeType.prototype, "onNodeCreated", function () {
+        this.reject_ue_connection = (input) => input?.name === "vae";
+    });
+
+    chainCallback(nodeType.prototype, "onConnectionsChange", function (contype, slot, iscon, linkInfo) {
+        if (contype !== LiteGraph.INPUT || slot !== 3 || !this.inputs?.[3] || this.inputs[3].type !== "VAE") {
+            return;
+        }
+
+        if (iscon && linkInfo) {
+            if (this.inputs[0].type === "IMAGE") this.disconnectInput(0);
+            this.inputs[0].type = "LATENT";
+        } else {
+            if (this.inputs[0].type === "LATENT") this.disconnectInput(0);
+            this.inputs[0].type = "IMAGE";
+        }
+    });
 }
 
 app.registerExtension({
-  name: "Trucy.VideoCombine",
-  beforeRegisterNodeDef(nodeType, nodeData) {
-    if (nodeData?.name !== NODE_NAME) return;
-    useKVState(nodeType);
-    useVhsNodeBehavior(nodeType, nodeData);
-    addDateFormatting(nodeType, "filename_prefix");
-    chainCallback(nodeType.prototype, "onExecuted", function (message) {
-      if (message?.gifs?.length && message.gifs[0]) {
-        this.updateParameters?.(message.gifs[0], true);
-      } else if (message?.output?.gifs?.length && message.output.gifs[0]) {
-        this.updateParameters?.(message.output.gifs[0], true);
-      } else if (message?.output?.images?.length && message.output.images[0]) {
-        this.updateParameters?.(message.output.images[0], true);
-      }
-    });
-    addVideoPreview(nodeType, false);
-    addFormatWidgets(nodeType);
-    addVAEInputToggle(nodeType);
-  },
+    name: "Trucy.VideoCombine",
+
+    getCustomWidgets() {
+        return {
+            VHSFLOAT(node, inputName, inputData) {
+                return createVhsNumberWidget(node, inputName, inputData, false);
+            },
+            VHSINT(node, inputName, inputData) {
+                return createVhsNumberWidget(node, inputName, inputData, true);
+            },
+        };
+    },
+
+    beforeRegisterNodeDef(nodeType, nodeData) {
+        if (nodeData?.name !== NODE_NAME) {
+            return;
+        }
+
+        // =====================================================================
+        // 【关键修复点】：补齐 nodeData.output 元数据，免疫 audio_analyzer 报错
+        // =====================================================================
+        if (!nodeData.output) {
+            nodeData.output = ["VHS_FILENAMES", "STRING"];
+        }
+        if (!nodeData.output_name) {
+            nodeData.output_name = ["video", "filepath"];
+        }
+        if (!nodeData.output_is_list) {
+            nodeData.output_is_list = [false, false];
+        }
+
+        useKVState(nodeType);
+        useVhsNodeBehavior(nodeType, nodeData);
+        addDateFormatting(nodeType, "filename_prefix");
+        addVideoPreview(nodeType);
+        addPreviewOptions(nodeType);
+        addFormatWidgets(nodeType);
+        addVAEInputToggle(nodeType);
+
+        chainCallback(nodeType.prototype, "onNodeCreated", function () {
+            // 确保创建节点实例时其 outputs 结构完全符合 LiteGraph 规范
+            if (!this.outputs || this.outputs.length === 0) {
+                this.outputs = [
+                    { name: "video", type: "VHS_FILENAMES", links: null },
+                    { name: "filepath", type: "STRING", links: null }
+                ];
+            }
+        });
+
+        chainCallback(nodeType.prototype, "onExecuted", function (message) {
+            if (message?.gifs?.[0]) {
+                this.updateParameters(message.gifs[0], true);
+            }
+        });
+    },
 });
