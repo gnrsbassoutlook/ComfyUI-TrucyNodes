@@ -5,11 +5,22 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 
 import folder_paths
+import torchaudio
 from comfy.cli_args import args
+
+# 导入 ComfyUI 官方/标准 VIDEO 对象封装
+try:
+    from comfy_api.input_impl import VideoFromFile
+except ImportError:
+    try:
+        from comfy_api.input.video_types import VideoFromFile
+    except ImportError:
+        VideoFromFile = None
 
 from .vhs_compat.nodes import VideoCombine as _VHSVideoCombine
 from .vhs_compat.nodes import get_video_formats as _get_video_formats
@@ -45,27 +56,30 @@ def _write_ffmetadata(metadata, path):
 
 
 class TrucyVideoCombine:
-    """Standard Video Combine with Filenames(VHS_FILENAMES) and filepath(STRING) outputs."""
+    """Standard Video Combine with native VIDEO and filepath(STRING) outputs."""
 
     @classmethod
     def INPUT_TYPES(cls):
         ffmpeg_formats, format_widgets = _get_video_formats()
         format_widgets["image/webp"] = [["lossless", "BOOLEAN", {"default": True}]]
+        
+        # 将 video/h264-mp4 置顶作为默认首选
+        all_formats = ["video/h264-mp4", "image/gif", "image/webp"] + [f for f in ffmpeg_formats if f != "video/h264-mp4"]
+        
         return {
             "required": {
-                "images": ("IMAGE",),
-                "frame_rate": ("FLOAT", {"default": 8.0, "min": 1.0, "step": 1.0}),
+                "frame_rate": ("FLOAT", {"default": 16.0, "min": 1.0, "step": 1.0}),
                 "loop_count": ("INT", {"default": 0, "min": 0, "max": 100, "step": 1}),
-                "filename_prefix": ("STRING", {"default": "AnimateDiff"}),
-                "format": (["image/gif", "image/webp"] + ffmpeg_formats, {"formats": format_widgets}),
+                "filename_prefix": ("STRING", {"default": "TrucyVideo"}),
+                "format": (all_formats, {"formats": format_widgets, "default": "video/h264-mp4"}),
                 "pingpong": ("BOOLEAN", {"default": False}),
                 "save_output": ("BOOLEAN", {"default": True}),
             },
             "optional": {
+                "images": ("IMAGE",),
+                "video": ("VIDEO",),
                 "audio": ("AUDIO",),
-                "meta_batch": ("VHS_BatchManager",),
-                "vae": ("VAE",),
-                "custom_path": ("STRING", {"default": ""}),
+                "custom_path": ("STRING", {"default": r"D:\ComfyUI-Output"}),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -74,7 +88,7 @@ class TrucyVideoCombine:
             },
         }
 
-    RETURN_TYPES = ("VHS_FILENAMES", "STRING")
+    RETURN_TYPES = ("VIDEO", "STRING")
     RETURN_NAMES = ("video", "filepath")
     OUTPUT_NODE = True
     CATEGORY = "Video Helper Suite 🎥🅥🅗🅢"
@@ -119,17 +133,135 @@ class TrucyVideoCombine:
                 except OSError:
                     pass
 
-    def combine_video(self, images, frame_rate=8.0, loop_count=0, filename_prefix="AnimateDiff",
-                      format="image/gif", pingpong=False, save_output=True, audio=None,
-                      meta_batch=None, vae=None, custom_path="", prompt=None, extra_pnginfo=None,
-                      unique_id=None, **format_values):
+    def _clean_audio_suffix(self, file_path):
+        """如果文件名以 -audio 结尾，重命名去掉 -audio"""
+        if not os.path.isfile(file_path):
+            return file_path
+        dir_name, base_name = os.path.split(file_path)
+        name, ext = os.path.splitext(base_name)
+        if name.endswith("-audio"):
+            clean_base_name = name[:-6] + ext
+            target_path = os.path.join(dir_name, clean_base_name)
+            if os.path.exists(target_path):
+                try:
+                    os.remove(target_path)
+                except OSError:
+                    pass
+            try:
+                os.replace(file_path, target_path)
+                return target_path
+            except OSError:
+                return file_path
+        return file_path
 
-        prefix = filename_prefix
-        if custom_path and str(custom_path).strip():
-            clean_path = str(custom_path).strip().strip("/\\")
-            prefix = os.path.join(clean_path, prefix)
+    def _process_video_input(self, video, audio, target_dir, filename_prefix, save_output):
+        """处理通过 VIDEO 输入的场景"""
+        ffmpeg = _ffmpeg_path()
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg 未找到，请确保系统中已正确配置 ffmpeg。")
+
+        # 1. 尝试获取输入视频的物理文件路径
+        in_video_path = None
+        temp_input_to_clean = None
+        if hasattr(video, "get_stream_source"):
+            src = video.get_stream_source()
+            if isinstance(src, (str, os.PathLike)) and Path(src).exists():
+                in_video_path = str(src)
+        if not in_video_path and isinstance(video, (str, os.PathLike)) and Path(video).exists():
+            in_video_path = str(video)
+
+        if not in_video_path:
+            temp_dir = Path(folder_paths.get_temp_directory())
+            temp_input_to_clean = str(temp_dir / f"trucy_tmp_in_{uuid.uuid4().hex}.mp4")
+            if hasattr(video, "save_to"):
+                video.save_to(temp_input_to_clean)
+                in_video_path = temp_input_to_clean
+            else:
+                raise ValueError("无法解析输入的 VIDEO 对象数据源。")
+
+        # 2. 计算输出目标文件名
+        out_folder = target_dir if save_output else folder_paths.get_temp_directory()
+        os.makedirs(out_folder, exist_ok=True)
+        out_filename = f"{filename_prefix}_{uuid.uuid4().hex[:8]}.mp4"
+        final_path = os.path.join(out_folder, out_filename)
+
+        # 3. 处理音频混流
+        temp_audio_path = None
+        if audio is not None and "waveform" in audio and "sample_rate" in audio:
+            waveform = audio["waveform"]
+            sample_rate = audio["sample_rate"]
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                temp_audio_path = f.name
+            torchaudio.save(temp_audio_path, waveform.squeeze(0), sample_rate=sample_rate)
+
+            # 视频使用流复制，合并新音频
+            cmd = [
+                ffmpeg, "-y", "-v", "error",
+                "-i", in_video_path,
+                "-i", temp_audio_path,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                final_path
+            ]
+        else:
+            # 仅复制/重命名视频流
+            cmd = [
+                ffmpeg, "-y", "-v", "error",
+                "-i", in_video_path,
+                "-c", "copy",
+                final_path
+            ]
+
+        try:
+            res = subprocess.run(cmd, capture_output=True, check=False)
+            if res.returncode != 0:
+                raise RuntimeError("ffmpeg 处理输入视频失败:\n" + res.stderr.decode("utf-8", errors="replace"))
+        finally:
+            if temp_audio_path and os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                except OSError:
+                    pass
+            if temp_input_to_clean and os.path.exists(temp_input_to_clean):
+                try:
+                    os.remove(temp_input_to_clean)
+                except OSError:
+                    pass
+
+        return final_path
+
+    def combine_video(self, frame_rate=16.0, loop_count=0, filename_prefix="TrucyVideo",
+                      format="video/h264-mp4", pingpong=False, save_output=True,
+                      images=None, video=None, audio=None, custom_path=r"D:\ComfyUI-Output",
+                      prompt=None, extra_pnginfo=None, unique_id=None, **format_values):
+
+        # 1. 严格检查 images 与 video 输入
+        if images is None and video is None:
+            raise ValueError("【Trucy 提示】: 'images' 和 'video' 输入至少需要连接一个！")
+        if images is not None and video is not None:
+            raise ValueError("【Trucy 提示】: 'images' 和 'video' 只能二选一输入，不能同时连接！")
 
         original_extra = extra_pnginfo or {}
+
+        # 2. 如果输入的是绿色 video
+        if video is not None:
+            target_dir = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else folder_paths.get_output_directory()
+            final_path = self._process_video_input(video, audio, target_dir, filename_prefix, save_output)
+            self._embed_metadata(final_path, self._metadata(prompt, original_extra))
+            abs_final_path = os.path.abspath(final_path)
+            video_out = VideoFromFile(abs_final_path) if VideoFromFile is not None else abs_final_path
+            ui_info = {"gifs": [{"filename": os.path.basename(abs_final_path), "fullpath": abs_final_path, "format": "video/mp4"}]}
+            return {"ui": ui_info, "result": (video_out, abs_final_path)}
+
+        # 3. 如果输入的是蓝色 images 图像序列
+        prefix = filename_prefix
+        if custom_path and str(custom_path).strip():
+            clean_path = str(custom_path).strip().rstrip("/\\")
+            prefix = os.path.join(clean_path, prefix)
+
         extra_info = copy.deepcopy(original_extra)
         workflow = extra_info.setdefault("workflow", {})
         workflow.setdefault("extra", {})["VHS_MetadataImage"] = False
@@ -147,8 +279,8 @@ class TrucyVideoCombine:
             extra_pnginfo=extra_info,
             audio=audio,
             unique_id=unique_id,
-            meta_batch=meta_batch,
-            vae=vae,
+            meta_batch=None,
+            vae=None,
             **format_values,
         )
 
@@ -156,19 +288,25 @@ class TrucyVideoCombine:
         filenames = result.get("result", ((save_output, []),))[0]
         output_files = list(filenames[1])
         if not output_files:
-            return {"ui": ui, "result": ((save_output, []), "")}
+            return {"ui": ui, "result": (None, "")}
 
         final_path = output_files[-1]
-        video_extensions = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
-        if os.path.isfile(final_path) and Path(final_path).suffix.lower() in video_extensions:
-            self._embed_metadata(final_path, self._metadata(prompt, original_extra))
 
+        # 清理原版肥猴可能产生的中间临时文件
         for path in output_files[:-1]:
             try:
                 if os.path.isfile(path):
                     os.remove(path)
             except OSError:
                 pass
+
+        # 自动剔除文件名中的 -audio
+        final_path = self._clean_audio_suffix(final_path)
+
+        # 嵌入元数据
+        video_extensions = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
+        if os.path.isfile(final_path) and Path(final_path).suffix.lower() in video_extensions:
+            self._embed_metadata(final_path, self._metadata(prompt, original_extra))
 
         preview = ui.get("gifs", [{}])[0]
         if preview:
@@ -177,8 +315,11 @@ class TrucyVideoCombine:
             preview["fullpath"] = final_path
 
         abs_final_path = os.path.abspath(final_path)
-        # 严格返回：(视频包, 路径字符串)
-        return {"ui": ui, "result": ((save_output, [final_path]), abs_final_path)}
+
+        # 构建标准的原生 VIDEO 对象输出
+        video_out = VideoFromFile(abs_final_path) if VideoFromFile is not None else abs_final_path
+
+        return {"ui": ui, "result": (video_out, abs_final_path)}
 
 
 NODE_CLASS_MAPPINGS = {
