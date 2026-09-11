@@ -246,32 +246,53 @@ class TrucyVideoCombine:
 
         original_extra = extra_pnginfo or {}
 
-        # 2. 如果输入的是绿色 video
+        # 处理自定义路径 (获取目标文件夹)
+        target_custom_path = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else None
+        
+        # 2. 如果输入的是绿色 video 端口
         if video is not None:
-            target_dir = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else folder_paths.get_output_directory()
-            final_path = self._process_video_input(video, audio, target_dir, filename_prefix, save_output)
-            self._embed_metadata(final_path, self._metadata(prompt, original_extra))
-            abs_final_path = os.path.abspath(final_path)
-            video_out = VideoFromFile(abs_final_path) if VideoFromFile is not None else abs_final_path
-            ui_info = {"gifs": [{"filename": os.path.basename(abs_final_path), "fullpath": abs_final_path, "format": "video/mp4"}]}
-            return {"ui": ui_info, "result": (video_out, abs_final_path)}
+            # 安全策略：永远先保存在 ComfyUI 默认文件夹，保证 UI 能读取！
+            internal_dir = folder_paths.get_output_directory() if save_output else folder_paths.get_temp_directory()
+            internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, save_output)
+            self._embed_metadata(internal_path, self._metadata(prompt, original_extra))
+            
+            final_return_path = internal_path
+            
+            # 镜像复制到自定义目录
+            if target_custom_path and os.path.isfile(internal_path):
+                os.makedirs(target_custom_path, exist_ok=True)
+                dest_path = os.path.join(target_custom_path, os.path.basename(internal_path))
+                shutil.copy2(internal_path, dest_path)
+                final_return_path = dest_path # 最终输出外部路径用于后续节点
+
+            video_out = VideoFromFile(final_return_path) if VideoFromFile is not None else final_return_path
+            
+            # UI 信息必须指向内部文件 (internal_path)，绝对不能用外部路径
+            ui_info = {
+                "gifs": [{
+                    "filename": os.path.basename(internal_path),
+                    "subfolder": "",
+                    "type": "output" if save_output else "temp",
+                    "format": "video/mp4",
+                    "t": uuid.uuid4().hex[:6] # 防缓存死锁
+                }]
+            }
+            return {"ui": ui_info, "result": (video_out, final_return_path)}
 
         # 3. 如果输入的是蓝色 images 图像序列
         prefix = filename_prefix
-        if custom_path and str(custom_path).strip():
-            clean_path = str(custom_path).strip().rstrip("/\\")
-            prefix = os.path.join(clean_path, prefix)
 
         extra_info = copy.deepcopy(original_extra)
         workflow = extra_info.setdefault("workflow", {})
         workflow.setdefault("extra", {})["VHS_MetadataImage"] = False
         workflow["extra"]["VHS_KeepIntermediate"] = False
 
+        # 让肥猴的节点老老实实保存在 ComfyUI 内部目录，绝对不要把 custom_path 传给它
         result = _VHSVideoCombine().combine_video(
             images=images,
             frame_rate=frame_rate,
             loop_count=loop_count,
-            filename_prefix=prefix,
+            filename_prefix=prefix, # 去掉了会引起报错的路径拼接
             format=format,
             pingpong=pingpong,
             save_output=save_output,
@@ -290,7 +311,7 @@ class TrucyVideoCombine:
         if not output_files:
             return {"ui": ui, "result": (None, "")}
 
-        final_path = output_files[-1]
+        internal_final_path = output_files[-1]
 
         # 清理原版肥猴可能产生的中间临时文件
         for path in output_files[:-1]:
@@ -301,25 +322,37 @@ class TrucyVideoCombine:
                 pass
 
         # 自动剔除文件名中的 -audio
-        final_path = self._clean_audio_suffix(final_path)
+        internal_final_path = self._clean_audio_suffix(internal_final_path)
 
         # 嵌入元数据
         video_extensions = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
-        if os.path.isfile(final_path) and Path(final_path).suffix.lower() in video_extensions:
-            self._embed_metadata(final_path, self._metadata(prompt, original_extra))
+        if os.path.isfile(internal_final_path) and Path(internal_final_path).suffix.lower() in video_extensions:
+            self._embed_metadata(internal_final_path, self._metadata(prompt, original_extra))
+            
+        final_return_path = internal_final_path
 
+        # 镜像复制到自定义目录
+        if target_custom_path and os.path.isfile(internal_final_path):
+            os.makedirs(target_custom_path, exist_ok=True)
+            dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
+            shutil.copy2(internal_final_path, dest_path)
+            final_return_path = dest_path # 给后续节点返回外部绝对路径
+
+        # 构建前端 UI 字典：保留原生字典里的 type, subfolder, filename (指向内部文件)，剔除外部 fullpath
         preview = ui.get("gifs", [{}])[0]
         if preview:
             preview.pop("workflow", None)
-            preview["filename"] = os.path.basename(final_path)
-            preview["fullpath"] = final_path
+            preview["filename"] = os.path.basename(internal_final_path)
+            # 关键：绝对不能把全路径设置为外部路径，否则 UI 报错加载不出
+            if "fullpath" in preview:
+                del preview["fullpath"]
+            preview["t"] = uuid.uuid4().hex[:6] # 追加时间戳防止 UI 缓存旧视频
 
-        abs_final_path = os.path.abspath(final_path)
+        # 构建标准的原生 VIDEO 对象输出 (携带目标真实绝对路径)
+        abs_final_return = os.path.abspath(final_return_path)
+        video_out = VideoFromFile(abs_final_return) if VideoFromFile is not None else abs_final_return
 
-        # 构建标准的原生 VIDEO 对象输出
-        video_out = VideoFromFile(abs_final_path) if VideoFromFile is not None else abs_final_path
-
-        return {"ui": ui, "result": (video_out, abs_final_path)}
+        return {"ui": ui, "result": (video_out, abs_final_return)}
 
 
 NODE_CLASS_MAPPINGS = {
