@@ -16,10 +16,6 @@ class _TrucyExcelBase:
 
     @classmethod
     def resolve_file(cls, excel_path):
-        """
-        如果输入文件夹，则自动选择按文件名排序后的第一个
-        .xlsx 或 .csv 文件。
-        """
         clean_path = cls.clean_path(excel_path)
 
         if os.path.isdir(clean_path):
@@ -52,16 +48,11 @@ class _TrucyExcelBase:
 
     @staticmethod
     def convert_value(cell_value):
-        """
-        将一个单元格同时转换为：
-        STRING、INT、FLOAT
-        """
         if cell_value is None or str(cell_value).strip() == "":
             return "N/A", 0, 0.0
 
         full_string = str(cell_value)
 
-        # 从复杂文本中提取第一个整数或小数
         number_match = re.search(
             r"[-+]?(?:\d+\.\d+|\d+|\.\d+)",
             full_string,
@@ -84,9 +75,6 @@ class _TrucyExcelBase:
 
     @classmethod
     def get_change_token(cls, excel_path):
-        """
-        文件发生修改时，让 ComfyUI 重新读取。
-        """
         target_file, error = cls.resolve_file(excel_path)
 
         if error or target_file is None:
@@ -104,33 +92,17 @@ class _TrucyExcelBase:
         sheet_name,
         positions,
     ):
-        """
-        一次读取多个单元格。
-
-        positions 格式：
-        [
-            (row_1, column_1),
-            (row_2, column_2),
-            ...
-        ]
-        """
         target_file, error = cls.resolve_file(excel_path)
 
         if error:
             results = []
-
             for _ in positions:
                 results.extend((error, 0, 0.0))
-
             return tuple(results)
 
         extension = os.path.splitext(target_file)[1].lower()
 
         try:
-            # =================================================
-            # CSV 读取
-            # CSV 不使用 sheet_name
-            # =================================================
             if extension == ".csv":
                 with open(
                     target_file,
@@ -142,7 +114,6 @@ class _TrucyExcelBase:
                     csv_data = list(csv.reader(csv_file))
 
                 results = []
-
                 for row, column in positions:
                     if not (1 <= row <= len(csv_data)):
                         results.extend(
@@ -174,10 +145,6 @@ class _TrucyExcelBase:
 
                 return tuple(results)
 
-            # =================================================
-            # XLSX 读取
-            # 多个单元格只打开一次工作簿，提高效率
-            # =================================================
             if extension == ".xlsx":
                 workbook = openpyxl.load_workbook(
                     target_file,
@@ -190,14 +157,11 @@ class _TrucyExcelBase:
                         error_message = (
                             f"Error: Sheet '{sheet_name}' not found"
                         )
-
                         results = []
-
                         for _ in positions:
                             results.extend(
                                 (error_message, 0, 0.0)
                             )
-
                         return tuple(results)
 
                     sheet = workbook[sheet_name]
@@ -229,25 +193,20 @@ class _TrucyExcelBase:
                 )
 
             results = []
-
             for _ in positions:
                 results.extend((error_message, 0, 0.0))
-
             return tuple(results)
 
         except Exception as error:
             error_message = f"Error: {error}"
             results = []
-
             for _ in positions:
                 results.extend((error_message, 0, 0.0))
-
             return tuple(results)
 
 
 # ========================================================
 # 原来的单路版本
-# 保留这个类，避免旧工作流丢失节点
 # ========================================================
 class TrucyExcelReader(_TrucyExcelBase):
     @classmethod
@@ -330,7 +289,7 @@ class TrucyExcelReader(_TrucyExcelBase):
 # 多路 Excel Reader 基类
 # ========================================================
 class _TrucyExcelMultiReader(_TrucyExcelBase):
-    CHANNELS = 5
+    CHANNELS = 6
 
     FUNCTION = "read_cells"
     CATEGORY = "TrucyNodes/Excel"
@@ -406,14 +365,15 @@ class _TrucyExcelMultiReader(_TrucyExcelBase):
 
 
 # ========================================================
-# 5 路版本
+# 6 路版本 (扩充为 6路)
 # 每一路输出 STRING、INT、FLOAT
-# 合计 15 个输出接口
+# 合计 18 个输出接口
 # ========================================================
 class TrucyExcelReader5(_TrucyExcelMultiReader):
-    CHANNELS = 5
+    CHANNELS = 6
 
     RETURN_TYPES = (
+        "STRING", "INT", "FLOAT",
         "STRING", "INT", "FLOAT",
         "STRING", "INT", "FLOAT",
         "STRING", "INT", "FLOAT",
@@ -427,6 +387,7 @@ class TrucyExcelReader5(_TrucyExcelMultiReader):
         "string_3", "int_3", "float_3",
         "string_4", "int_4", "float_4",
         "string_5", "int_5", "float_5",
+        "string_6", "int_6", "float_6",
     )
 
 
@@ -474,9 +435,8 @@ NODE_CLASS_MAPPINGS = {
     "TrucyExcelReader10": TrucyExcelReader10,
 }
 
-
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyExcelReader": "Excel-Reader-Trucy",
-    "TrucyExcelReader5": "Excel-Reader-5-Trucy",
+    "TrucyExcelReader5": "Excel-Reader-6-Trucy",
     "TrucyExcelReader10": "Excel-Reader-10-Trucy",
 }

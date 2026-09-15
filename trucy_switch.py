@@ -31,10 +31,13 @@ def workflow_to_map(workflow):
     for node in workflow.get('nodes', []): nodes_map[str(node['id'])] = node
     return nodes_map, links_map
 
+# ==========================================
+# 已升级为 6 路 Switch
+# ==========================================
 class TrucyAnySwitch5:
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"select_input": ("INT", {"default": 1, "min": 1, "max": 5})}, "optional": {f"input_{i}": (any_type,) for i in range(1, 6)}}
+        return {"required": {"select_input": ("INT", {"default": 1, "min": 1, "max": 6})}, "optional": {f"input_{i}": (any_type,) for i in range(1, 7)}}
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = (any_type,), ("output",), "switch", "TrucyNodes/Logic"
     def switch(self, select_input, **kwargs): return (kwargs.get(f"input_{select_input}", None),)
 
@@ -99,9 +102,6 @@ class TrucyControlBridge:
                         action_to_take = "mutes" if behavior == "Mute" else "bypasses"
                         print(f"[TrucyNodes] Bridging OFF: Silencing downstream nodes: {nodes_to_change}")
                         PromptServer.instance.send_sync("impact-bridge-continue", {"node_id": unique_id, action_to_take: nodes_to_change})
-                        
-                        # 只有在关闭 (杀节点) 的时候，才允许打断当前进程。
-                        # 因为关闭操作必须立即生效，否则下游可能带着错误数据跑出垃圾图。
                         nodes.interrupt_processing()
                         return (data_to_pass,)
 
@@ -113,12 +113,7 @@ class TrucyControlBridge:
                     if nodes_to_change: 
                         action_to_take = "actives"
                         print(f"[TrucyNodes] Bridging ON: Reactivating downstream nodes: {nodes_to_change}")
-                        # 发送唤醒信号给网页前端
                         PromptServer.instance.send_sync("impact-bridge-continue", {"node_id": unique_id, action_to_take: nodes_to_change})
-                        
-                        # 【核心修复】：坚决不打断！不触发重跑！
-                        # 允许数据直接流过去。只要数据到了，即使前端网页还没反应过来，底层的 Python 代码也会乖乖计算。
-                        # 这样彻底消灭了多重循环环境下的死锁与卡排队问题！
                         pass 
                 
         except Exception as e: 

@@ -146,7 +146,7 @@ class TrucyKleinEncode(BaseTrucyKleinEncode):
         return self.encode_klein_logic(count=10, **kwargs)
 
 # ======================================================================
-# 节点 2：新增的 5图轻量版
+# 节点 2：已升级为 6图轻量版
 # ======================================================================
 class TrucyKleinEncode5(BaseTrucyKleinEncode):
     @classmethod
@@ -159,14 +159,14 @@ class TrucyKleinEncode5(BaseTrucyKleinEncode):
                 "height": ("INT", {"default": 1088, "min": 512, "max": 4096, "step": 8}),
                 "non_base_alignment": (["Follow Node (W/H)", "Use RSA Scaling"], {"default": "Follow Node (W/H)"}),
                 "rsa_value": ("INT", {"default": 1024, "min": 64, "max": 8192, "step": 16}),
-                "base_target": (["None"] + [f"img{i}" for i in range(1, 6)], {"default": "img1"}),
+                "base_target": (["None"] + [f"img{i}" for i in range(1, 7)], {"default": "img1"}),
             },
             "optional": {
                 "vae": ("VAE",),
                 "base_mask": ("MASK",),  
             }
         }
-        for i in range(1, 6):
+        for i in range(1, 7):
             inputs["optional"][f"img{i}"] = ("IMAGE",)
             inputs["optional"][f"img{i}_strength"] = ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.05})
         return inputs
@@ -177,7 +177,7 @@ class TrucyKleinEncode5(BaseTrucyKleinEncode):
     CATEGORY = "TrucyNodes/Conditioning"
 
     def execute(self, **kwargs):
-        return self.encode_klein_logic(count=5, **kwargs)
+        return self.encode_klein_logic(count=6, **kwargs)
 
 NODE_CLASS_MAPPINGS = {
     "TrucyKleinEncode": TrucyKleinEncode,
@@ -186,5 +186,5 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyKleinEncode": "Klein-Model Text Encode (10ch) (Trucy)",
-    "TrucyKleinEncode5": "Klein-Model Text Encode (5ch) (Trucy)"
+    "TrucyKleinEncode5": "Klein-Model Text Encode (6ch) (Trucy)"
 }

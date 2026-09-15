@@ -39,7 +39,7 @@ def load_image_file(path):
     except: return None
 
 # ========================================================
-# 1. 🚀 字符加载器基类及节点 (String 5 / 10) - 增强精准匹配
+# 1. 🚀 字符加载器基类及节点 (已升级为 6 路)
 # ========================================================
 class BaseTrucyLoaderDirect:
     def process_common(self, folder_path, empty_style, count, **kwargs):
@@ -58,14 +58,12 @@ class BaseTrucyLoaderDirect:
         return tuple(images)
 
     def parse_id(self, text):
-        # 严格解析出 前缀、数字、后缀字母
         match = re.match(r'^([a-zA-Z]+)(\d+)([a-zA-Z]?)$', text.strip())
         if match: 
             return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
         return None, None, None
 
     def parse_filename(self, filename):
-        # 解析文件名，支持 X1, X1a, X1-描述 等格式
         match = re.match(r'^([a-zA-Z]+)(\d+)([a-zA-Z]?)(?:[.\-_ \u4e00-\u9fa5].*)?$', filename)
         if match: 
             return match.group(1).lower(), int(match.group(2)), match.group(3).lower()
@@ -76,18 +74,15 @@ class BaseTrucyLoaderDirect:
         supported_exts = [".png", ".jpg", ".jpeg", ".webp", ".bmp"]
         input_str = input_str.strip()
         
-        # 1. 第一优先级：绝对精确匹配 (假设用户输入就是完整文件名不带后缀)
         for ext in supported_exts:
             exact_path = os.path.join(folder, f"{input_str}{ext}")
             if os.path.isfile(exact_path): 
                 return exact_path
 
-        # 如果输入带有后缀，直接测试绝对路径
         direct_path = os.path.join(folder, input_str)
         if os.path.isfile(direct_path): 
             return direct_path
 
-        # 2. 第二优先级：智能解析匹配 (解决 X1 和 X1a 的冲突)
         inp_prefix, inp_num, inp_suffix = self.parse_id(input_str)
         
         try:
@@ -104,22 +99,16 @@ class BaseTrucyLoaderDirect:
                     if f_prefix is None: 
                         continue
                     
-                    # 【核心修复】：必须前缀、数字、后缀 *三个要素完全一致* 才算匹配！
-                    # 如果你输入 X1 (suffix=""), 遇到 X1a (f_suffix="a") 时，这里的条件将判定为 False！
                     if (inp_prefix == f_prefix and inp_num == f_num and inp_suffix == f_suffix):
                         candidates.append(filename)
                         
                 if candidates:
-                    # 如果有多个候选（比如 X1.png 和 X1-描述.png），优先选名字最短的（即最纯粹的那个）
                     candidates.sort(key=len)
                     return os.path.join(folder, candidates[0])
 
-            # 3. 第三优先级：降级模糊匹配 (仅当以上都不符合时)
-            # 为了防止 X1 错误匹配到 X10 或 X1a，我们在匹配时要求必须遇到分隔符
             for filename in all_files:
                 if any(filename.lower().endswith(ext) for ext in supported_exts):
                     name_stem = os.path.splitext(filename)[0]
-                    # 只有当文件名恰好等于输入，或者输入之后紧跟的是分隔符/空格时才匹配
                     if name_stem == input_str or name_stem.startswith(input_str + "-") or name_stem.startswith(input_str + "_") or name_stem.startswith(input_str + " "):
                         return os.path.join(folder, filename)
 
@@ -133,10 +122,10 @@ class TrucyImageLoaderString5(BaseTrucyLoaderDirect):
     def INPUT_TYPES(s):
         return {
             "required": {"folder_path": ("STRING", {"default": "C:/Images"}), "empty_style": (["White", "Black"],)},
-            "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 6)}
+            "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 7)}
         }
-    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*5, tuple(f"Img_{i}" for i in range(1, 6)), "run", "TrucyNodes/Toolkit"
-    def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 5, **kwargs)
+    RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*6, tuple(f"Img_{i}" for i in range(1, 7)), "run", "TrucyNodes/Toolkit"
+    def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 6, **kwargs)
 
 class TrucyImageLoaderString10(BaseTrucyLoaderDirect):
     @classmethod
@@ -149,7 +138,7 @@ class TrucyImageLoaderString10(BaseTrucyLoaderDirect):
     def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 10, **kwargs)
 
 # ========================================================
-# 2. 🚀 智能文本拆分器系列 (15路 / 30路全口径输出)
+# 2. 🚀 智能文本拆分器系列 (已升级为 6 路)
 # ========================================================
 TRUCY_SEPARATORS = ["|", "#", "@", "$", "%", "&", "*", "~", "!", "^", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", "<", ">", ":", ";", ",", ".", "/", "\\"]
 
@@ -185,10 +174,10 @@ class TrucyPromptSplitter5(BaseTrucySplitter):
                 "bracket_index": ("INT", {"default": 1, "min": 1}),
             }
         }
-    RETURN_TYPES = ("STRING",)*5 + ("INT",)*5 + ("FLOAT",)*5
-    RETURN_NAMES = tuple([f"Text_{i}" for i in range(1, 6)] + [f"Int_{i}" for i in range(1, 6)] + [f"Float_{i}" for i in range(1, 6)])
+    RETURN_TYPES = ("STRING",)*6 + ("INT",)*6 + ("FLOAT",)*6
+    RETURN_NAMES = tuple([f"Text_{i}" for i in range(1, 7)] + [f"Int_{i}" for i in range(1, 7)] + [f"Float_{i}" for i in range(1, 7)])
     FUNCTION, CATEGORY = "run", "TrucyNodes/Toolkit"
-    def run(self, **kwargs): return self.split_logic(count=5, **kwargs)
+    def run(self, **kwargs): return self.split_logic(count=6, **kwargs)
 
 class TrucyPromptSplitter10(BaseTrucySplitter):
     @classmethod

@@ -110,7 +110,7 @@ class TrucyImageAdapter:
             return (image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :],)
 
 # ========================================================
-# 3. VLM 专用防粘连资产网格
+# 3. VLM 专用防粘连资产网格 (已升级为 6 路)
 # ========================================================
 class BaseTrucyGrid:
     def create_grid(self, thumbnail_size, columns, add_labels, count, **kwargs):
@@ -157,13 +157,13 @@ class TrucyAssetGrid5(BaseTrucyGrid):
         return {
             "required": {
                 "thumbnail_size": ([256, 512, 768, 1024, 1280, 1920], {"default": 512}),
-                "columns": ("INT", {"default": 5, "min": 1, "max": 5}),
+                "columns": ("INT", {"default": 6, "min": 1, "max": 6}),
                 "add_labels": ("BOOLEAN", {"default": True}),
             },
-            "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 6)}
+            "optional": {f"img_{i}": ("IMAGE",) for i in range(1, 7)}
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",), ("Grid",), "run", "TrucyNodes/Image"
-    def run(self, **kwargs): return self.create_grid(count=5, **kwargs)
+    def run(self, **kwargs): return self.create_grid(count=6, **kwargs)
 
 class TrucyAssetGrid10(BaseTrucyGrid):
     @classmethod
@@ -180,22 +180,22 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
 
 # ========================================================
-# 4. 纯图像无损直通桥接器
+# 4. 纯图像无损直通桥接器 (已升级为 6 路)
 # ========================================================
 class TrucyImageBridge5:
     @classmethod
     def INPUT_TYPES(cls):
         inputs = {"required": {}, "optional": {}}
-        for i in range(1, 6):
+        for i in range(1, 7):
             inputs["required"][f"pass_out_{i}"] = ("BOOLEAN", {"default": True, "label_on": f"Out {i} ON", "label_off": f"Out {i} OFF"})
             inputs["optional"][f"img{i}"] = ("IMAGE",)
         return inputs
 
-    RETURN_TYPES = ("IMAGE",) * 5
-    RETURN_NAMES = tuple(f"img{i}" for i in range(1, 6))
+    RETURN_TYPES = ("IMAGE",) * 6
+    RETURN_NAMES = tuple(f"img{i}" for i in range(1, 7))
     FUNCTION, CATEGORY = "bridge", "TrucyNodes/Image"
     def bridge(self, **kwargs):
-        return tuple(kwargs.get(f"img{i}") if kwargs.get(f"pass_out_{i}", True) else None for i in range(1, 6))
+        return tuple(kwargs.get(f"img{i}") if kwargs.get(f"pass_out_{i}", True) else None for i in range(1, 7))
 
 class TrucyImageBridge10:
     @classmethod
@@ -224,8 +224,8 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyImageLoaderIndex": "🚀 Image Loader by Index (Trucy)",
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
-    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (5)",
+    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (6)",
     "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
-    "TrucyImageBridge5": "🚀 Image Bridge (5ch) (Trucy)",
+    "TrucyImageBridge5": "🚀 Image Bridge (6ch) (Trucy)",
     "TrucyImageBridge10": "🚀 Image Bridge (10ch) (Trucy)"
 }
