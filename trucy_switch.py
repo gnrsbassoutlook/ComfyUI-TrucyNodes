@@ -32,9 +32,9 @@ def workflow_to_map(workflow):
     return nodes_map, links_map
 
 # ==========================================
-# 已升级为 6 路 Switch
+# 彻底正名为 6 路 Switch (TrucyAnySwitch6)
 # ==========================================
-class TrucyAnySwitch5:
+class TrucyAnySwitch6:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {"select_input": ("INT", {"default": 1, "min": 1, "max": 6})}, "optional": {f"input_{i}": (any_type,) for i in range(1, 7)}}
@@ -122,5 +122,5 @@ class TrucyControlBridge:
         return (data_to_pass, )
 
 NODE_CLASS_MAPPINGS = {
-    "TrucyAnySwitch5": TrucyAnySwitch5, "TrucyAnySwitch10": TrucyAnySwitch10, "TrucyControlBridge": TrucyControlBridge
+    "TrucyAnySwitch6": TrucyAnySwitch6, "TrucyAnySwitch10": TrucyAnySwitch10, "TrucyControlBridge": TrucyControlBridge
 }

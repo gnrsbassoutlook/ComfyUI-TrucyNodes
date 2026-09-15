@@ -110,7 +110,7 @@ class TrucyImageAdapter:
             return (image_scaled[:, y_start:y_start + target_height, x_start:x_start + target_width, :],)
 
 # ========================================================
-# 3. VLM 专用防粘连资产网格 (已升级为 6 路)
+# 3. VLM 专用防粘连资产网格 (TrucyAssetGrid6)
 # ========================================================
 class BaseTrucyGrid:
     def create_grid(self, thumbnail_size, columns, add_labels, count, **kwargs):
@@ -151,7 +151,7 @@ class BaseTrucyGrid:
 
         return (torch.from_numpy(np.array(grid_img).astype(np.float32) / 255.0).unsqueeze(0),)
 
-class TrucyAssetGrid5(BaseTrucyGrid):
+class TrucyAssetGrid6(BaseTrucyGrid):
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -180,9 +180,9 @@ class TrucyAssetGrid10(BaseTrucyGrid):
     def run(self, **kwargs): return self.create_grid(count=10, **kwargs)
 
 # ========================================================
-# 4. 纯图像无损直通桥接器 (已升级为 6 路)
+# 4. 纯图像无损直通桥接器 (TrucyImageBridge6)
 # ========================================================
-class TrucyImageBridge5:
+class TrucyImageBridge6:
     @classmethod
     def INPUT_TYPES(cls):
         inputs = {"required": {}, "optional": {}}
@@ -215,17 +215,17 @@ class TrucyImageBridge10:
 NODE_CLASS_MAPPINGS = {
     "TrucyImageLoaderIndex": TrucyImageLoaderIndex,
     "TrucyImageAdapter": TrucyImageAdapter,
-    "TrucyAssetGrid5": TrucyAssetGrid5,
+    "TrucyAssetGrid6": TrucyAssetGrid6,
     "TrucyAssetGrid10": TrucyAssetGrid10,
-    "TrucyImageBridge5": TrucyImageBridge5,
+    "TrucyImageBridge6": TrucyImageBridge6,
     "TrucyImageBridge10": TrucyImageBridge10
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyImageLoaderIndex": "🚀 Image Loader by Index (Trucy)",
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
-    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (6)",
+    "TrucyAssetGrid6": "🚀 Trucy Asset Grid (6)",
     "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
-    "TrucyImageBridge5": "🚀 Image Bridge (6ch) (Trucy)",
+    "TrucyImageBridge6": "🚀 Image Bridge (6ch) (Trucy)",
     "TrucyImageBridge10": "🚀 Image Bridge (10ch) (Trucy)"
 }

@@ -1,9 +1,9 @@
 import torch
 
 # ==========================================
-# 1. 扩充为 6x6 开关节点
+# 6x6 远程开关控制节点 (TrucyRemoteToggle6x6)
 # ==========================================
-class TrucyRemoteToggle5x5:
+class TrucyRemoteToggle6x6:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -29,11 +29,10 @@ class TrucyRemoteToggle5x5:
     OUTPUT_NODE = True
     
     def dummy_pass(self, **kwargs):
-        # 纯前端逻辑，后端直接透传
         return ()
 
 # ==========================================
-# 2. 5通道主控矩阵路由
+# 5通道主控矩阵路由
 # ==========================================
 class TrucyMasterIntRouter:
     @classmethod
@@ -56,5 +55,4 @@ class TrucyMasterIntRouter:
     CATEGORY = "TrucyNodes"
 
     def route_int(self, master_int, off_behavior, Mode_1_Node_IDs, Mode_2_Node_IDs, Mode_3_Node_IDs, Mode_4_Node_IDs, Mode_5_Node_IDs):
-        # Python 后端透传数字给下游，实际变灰控制由前端 JS 完成
         return (master_int,)

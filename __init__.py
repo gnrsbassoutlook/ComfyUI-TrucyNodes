@@ -12,13 +12,13 @@ subprocess.Popen.__init__ = _patched_Popen_init
 # 模块导入
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart, TrucyTextCleaner
-from .excel_nodes import TrucyExcelReader, TrucyExcelReader5, TrucyExcelReader10
-from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode5
-from .image_adapter import TrucyImageLoaderIndex, TrucyImageAdapter, TrucyAssetGrid5, TrucyAssetGrid10, TrucyImageBridge5, TrucyImageBridge10
-from .trucy_toolkit import TrucyImageLoaderString5, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter5, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
-from .trucy_switch import TrucyAnySwitch5, TrucyAnySwitch10, TrucyControlBridge
+from .excel_nodes import TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10
+from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode6
+from .image_adapter import TrucyImageLoaderIndex, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
+from .trucy_toolkit import TrucyImageLoaderString6, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter6, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
+from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge
 from .trucy_loop import TrucyForLoopStart9ch, TrucyForLoopEnd9ch, TrucyForLoopStart2ch, TrucyForLoopEnd2ch
-from .trucy_remote import TrucyRemoteToggle5x5, TrucyMasterIntRouter
+from .trucy_remote import TrucyRemoteToggle6x6, TrucyMasterIntRouter
 
 # 可选模块安全导入
 def _safe_import(module_name, class_names):
@@ -44,26 +44,26 @@ NODE_CLASS_MAPPINGS = {
     "TrucyTextToNumber": TrucyTextToNumber,
     "TrucyTextSlicerSmart": TrucyTextSlicerSmart,
     "TrucyTextCleaner": TrucyTextCleaner,
-    "TrucyAnySwitch5": TrucyAnySwitch5,
+    "TrucyAnySwitch6": TrucyAnySwitch6,
     "TrucyAnySwitch10": TrucyAnySwitch10,
     "TrucyControlBridge": TrucyControlBridge,
-    "TrucyRemoteToggle5x5": TrucyRemoteToggle5x5,
+    "TrucyRemoteToggle6x6": TrucyRemoteToggle6x6,
     "TrucyMasterIntRouter": TrucyMasterIntRouter,
     "TrucyExcelReader": TrucyExcelReader,
-    "TrucyExcelReader5": TrucyExcelReader5,
+    "TrucyExcelReader6": TrucyExcelReader6,
     "TrucyExcelReader10": TrucyExcelReader10,
     "TrucyKleinEncode": TrucyKleinEncode,
-    "TrucyKleinEncode5": TrucyKleinEncode5,
+    "TrucyKleinEncode6": TrucyKleinEncode6,
     "TrucyImageLoaderIndex": TrucyImageLoaderIndex,
     "TrucyImageAdapter": TrucyImageAdapter,
-    "TrucyAssetGrid5": TrucyAssetGrid5,
+    "TrucyAssetGrid6": TrucyAssetGrid6,
     "TrucyAssetGrid10": TrucyAssetGrid10,
-    "TrucyImageBridge5": TrucyImageBridge5,
+    "TrucyImageBridge6": TrucyImageBridge6,
     "TrucyImageBridge10": TrucyImageBridge10,
-    "TrucyImageLoaderString5": TrucyImageLoaderString5,
+    "TrucyImageLoaderString6": TrucyImageLoaderString6,
     "TrucyImageLoaderString10": TrucyImageLoaderString10,
     "TrucyFolderIterator": TrucyFolderIterator,
-    "TrucyPromptSplitter5": TrucyPromptSplitter5,
+    "TrucyPromptSplitter6": TrucyPromptSplitter6,
     "TrucyPromptSplitter10": TrucyPromptSplitter10,
     "TrucyIDExtractor": TrucyIDExtractor,
     "TrucyStringSlicer": TrucyStringSlicer,
@@ -96,26 +96,26 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyTextToNumber": "🚀 Text to Number Converter (Trucy)",
     "TrucyTextSlicerSmart": "🚀 Text Smart Slicer (Trucy)",
     "TrucyTextCleaner": "🚀 Text Cleaner (Trucy)",
-    "TrucyAnySwitch5": "🚀 Any Switch (6ch) (Trucy)",
+    "TrucyAnySwitch6": "🚀 Any Switch (6ch) (Trucy)",
     "TrucyAnySwitch10": "🚀 Any Switch (10ch) (Trucy)",
     "TrucyControlBridge": "🚀 Control Bridge (Trucy)",
-    "TrucyRemoteToggle5x5": "🚀 Remote Toggle 6x6 (Trucy)",
+    "TrucyRemoteToggle6x6": "🚀 Remote Toggle 6x6 (Trucy)",
     "TrucyMasterIntRouter": "🚀 5-way Mute/Bypass Nodes-Remote (Trucy)",
     "TrucyExcelReader": "🚀 Excel-Reader-Trucy",
-    "TrucyExcelReader5": "🚀 Excel-Reader-6-Trucy",
+    "TrucyExcelReader6": "🚀 Excel-Reader-6-Trucy",
     "TrucyExcelReader10": "🚀 Excel-Reader-10-Trucy",
     "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
-    "TrucyKleinEncode5": "🚀 Klein-Model Text Encode (6ch) (Trucy)",
+    "TrucyKleinEncode6": "🚀 Klein-Model Text Encode (6ch) (Trucy)",
     "TrucyImageLoaderIndex": "🚀 Image Loader by Index (Trucy)",
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
-    "TrucyAssetGrid5": "🚀 Trucy Asset Grid (6)",
+    "TrucyAssetGrid6": "🚀 Trucy Asset Grid (6)",
     "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",
-    "TrucyImageBridge5": "🚀 Image Bridge (6ch) (Trucy)",
+    "TrucyImageBridge6": "🚀 Image Bridge (6ch) (Trucy)",
     "TrucyImageBridge10": "🚀 Image Bridge (10ch) (Trucy)",
-    "TrucyImageLoaderString5": "🚀 Trucy Image Loader (String 6)",
+    "TrucyImageLoaderString6": "🚀 Trucy Image Loader (String 6)",
     "TrucyImageLoaderString10": "🚀 Trucy Image Loader (String 10)",
     "TrucyFolderIterator": "🚀 Trucy Folder Iterator",
-    "TrucyPromptSplitter5": "🚀 Trucy Text Splitter (6)",
+    "TrucyPromptSplitter6": "🚀 Trucy Text Splitter (6)",
     "TrucyPromptSplitter10": "🚀 Trucy Text Splitter (10)",
     "TrucyIDExtractor": "🚀 Trucy ID Extractor",
     "TrucyStringSlicer": "🚀 Trucy String Slicer",

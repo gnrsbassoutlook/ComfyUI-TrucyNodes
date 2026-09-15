@@ -30,7 +30,6 @@ class BaseTrucyKleinEncode:
 
         image_prompt_accumulated = ""
         assets = []
-        # 动态收集资产
         for i in range(1, count + 1):
             img = kwargs.get(f"img{i}", None)
             strength = kwargs.get(f"img{i}_strength", 1.0)
@@ -41,13 +40,10 @@ class BaseTrucyKleinEncode:
         if base_target != "None":
             target_base_idx = int(base_target.replace("img", ""))
             
-        base_influence = 8 * 0.5 * (0.5 - 1) - 6 * 0.5 + 6 # 默认 1.0 权重
-
         for loop_idx, (image, strength, asset_idx) in enumerate(assets):
             samples = image.movedim(-1, 1)
             is_base = (asset_idx == target_base_idx)
             is_full_canvas = (base_target == "all" or is_base)
-            is_primary_output = is_base or (base_target == "all" and loop_idx == 0)
 
             # --- 1. Vision Encoder ---
             current_total = samples.shape[3] * samples.shape[2]
@@ -66,23 +62,19 @@ class BaseTrucyKleinEncode:
                 
                 pure_latent_tensor = encoded["samples"] if isinstance(encoded, dict) else encoded
                 
-                # 基准图特权：输出底图和遮罩
                 if is_base:
                     base_output_latent = pure_latent_tensor.clone()
                     if base_mask is not None:
                         mask = base_mask.unsqueeze(0).unsqueeze(0) if base_mask.dim() == 2 else base_mask.unsqueeze(1)
                         noise_mask = comfy.utils.common_upscale(mask, width // 8, height // 8, "area", "center").squeeze(1)
             else:
-                # 优化模式
                 scale_by = math.sqrt((rsa_value * rsa_value) / current_total)
                 vae_w, vae_h = round(samples.shape[3] * scale_by / 8.0) * 8, round(samples.shape[2] * scale_by / 8.0) * 8
                 s_vae = comfy.utils.common_upscale(samples, vae_w, vae_h, "area", "disabled")
                 encoded = vae.encode(s_vae.movedim(1, -1)[:, :, :, :3])
                 pure_latent_tensor = encoded["samples"] if isinstance(encoded, dict) else encoded
             
-            # 应用强度滑块
             ref_latents.append(pure_latent_tensor * strength)
-            # 统一命名标签
             image_prompt_accumulated += f"img{asset_idx}: <|vision_start|><|image_pad|><|vision_end|> "
 
         # --- 3. 正负面组装 ---
@@ -112,7 +104,7 @@ class BaseTrucyKleinEncode:
         return (positive_cond, negative_cond, latent_out)
 
 # ======================================================================
-# 节点 1：10图标准版 (类名保持不变)
+# 节点 1：10图标准版
 # ======================================================================
 class TrucyKleinEncode(BaseTrucyKleinEncode):
     @classmethod
@@ -146,9 +138,9 @@ class TrucyKleinEncode(BaseTrucyKleinEncode):
         return self.encode_klein_logic(count=10, **kwargs)
 
 # ======================================================================
-# 节点 2：已升级为 6图轻量版
+# 节点 2：6图版 (TrucyKleinEncode6)
 # ======================================================================
-class TrucyKleinEncode5(BaseTrucyKleinEncode):
+class TrucyKleinEncode6(BaseTrucyKleinEncode):
     @classmethod
     def INPUT_TYPES(cls):
         inputs = {
@@ -181,10 +173,10 @@ class TrucyKleinEncode5(BaseTrucyKleinEncode):
 
 NODE_CLASS_MAPPINGS = {
     "TrucyKleinEncode": TrucyKleinEncode,
-    "TrucyKleinEncode5": TrucyKleinEncode5
+    "TrucyKleinEncode6": TrucyKleinEncode6
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyKleinEncode": "Klein-Model Text Encode (10ch) (Trucy)",
-    "TrucyKleinEncode5": "Klein-Model Text Encode (6ch) (Trucy)"
+    "TrucyKleinEncode6": "Klein-Model Text Encode (6ch) (Trucy)"
 }

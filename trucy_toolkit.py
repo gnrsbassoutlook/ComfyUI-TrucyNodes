@@ -39,7 +39,7 @@ def load_image_file(path):
     except: return None
 
 # ========================================================
-# 1. 🚀 字符加载器基类及节点 (已升级为 6 路)
+# 1. 字符加载器基类及节点 (TrucyImageLoaderString6)
 # ========================================================
 class BaseTrucyLoaderDirect:
     def process_common(self, folder_path, empty_style, count, **kwargs):
@@ -117,7 +117,7 @@ class BaseTrucyLoaderDirect:
             
         return None
 
-class TrucyImageLoaderString5(BaseTrucyLoaderDirect):
+class TrucyImageLoaderString6(BaseTrucyLoaderDirect):
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -138,7 +138,7 @@ class TrucyImageLoaderString10(BaseTrucyLoaderDirect):
     def run(self, folder_path, empty_style, **kwargs): return self.process_common(folder_path, empty_style, 10, **kwargs)
 
 # ========================================================
-# 2. 🚀 智能文本拆分器系列 (已升级为 6 路)
+# 2. 智能文本拆分器系列 (TrucyPromptSplitter6)
 # ========================================================
 TRUCY_SEPARATORS = ["|", "#", "@", "$", "%", "&", "*", "~", "!", "^", "(", ")", "-", "_", "+", "=", "{", "}", "[", "]", "<", ">", ":", ";", ",", ".", "/", "\\"]
 
@@ -163,7 +163,7 @@ class BaseTrucySplitter:
             f_out.append(num_f)
         return tuple(s_out + i_out + f_out)
 
-class TrucyPromptSplitter5(BaseTrucySplitter):
+class TrucyPromptSplitter6(BaseTrucySplitter):
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -197,7 +197,7 @@ class TrucyPromptSplitter10(BaseTrucySplitter):
 
 
 # ========================================================
-# 3. 🚀 ID 提取器 (支持 2位 到 5位 智能识别)
+# 3. ID 提取器 (支持 2位 到 5位 智能识别)
 # ========================================================
 class TrucyIDExtractor:
     @classmethod
@@ -243,7 +243,7 @@ class TrucyIDExtractor:
 
 
 # ========================================================
-# 4. 🚀 文本切割器 (TrucyStringSlicer)
+# 4. 文本切割器 (TrucyStringSlicer)
 # ========================================================
 class TrucyStringSlicer:
     @classmethod
@@ -271,7 +271,7 @@ class TrucyStringSlicer:
 
 
 # ========================================================
-# 5. 🚀 文件夹遍历器 (TrucyFolderIterator)
+# 5. 文件夹遍历器 (TrucyFolderIterator)
 # ========================================================
 class TrucyFolderIterator:
     @classmethod
@@ -299,7 +299,7 @@ class TrucyFolderIterator:
 
 
 # ========================================================
-# 6. 🚀 训练数据集保存器 (TrucyDatasetSaver)
+# 6. 训练数据集保存器 (TrucyDatasetSaver)
 # ========================================================
 class TrucyDatasetSaver:
     def __init__(self): self.output_dir = folder_paths.get_output_directory()
@@ -321,13 +321,13 @@ class TrucyDatasetSaver:
         return {"ui": {"images": []}}
 
 # ========================================================
-# 注册映射 
+# 注册映射 (全部纯净为 6)
 # ========================================================
 NODE_CLASS_MAPPINGS = {
-    "TrucyImageLoaderString5": TrucyImageLoaderString5,
+    "TrucyImageLoaderString6": TrucyImageLoaderString6,
     "TrucyImageLoaderString10": TrucyImageLoaderString10,
     "TrucyFolderIterator": TrucyFolderIterator,
-    "TrucyPromptSplitter5": TrucyPromptSplitter5,
+    "TrucyPromptSplitter6": TrucyPromptSplitter6,
     "TrucyPromptSplitter10": TrucyPromptSplitter10,
     "TrucyIDExtractor": TrucyIDExtractor,
     "TrucyStringSlicer": TrucyStringSlicer,

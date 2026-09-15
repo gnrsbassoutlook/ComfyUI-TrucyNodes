@@ -194,19 +194,19 @@ class _TrucyExcelBase:
 
             results = []
             for _ in positions:
-                results.extend((error_message, 0, 0.0))
+                results.extend((error, 0, 0.0))
             return tuple(results)
 
         except Exception as error:
             error_message = f"Error: {error}"
             results = []
             for _ in positions:
-                results.extend((error_message, 0, 0.0))
+                results.extend((error, 0, 0.0))
             return tuple(results)
 
 
 # ========================================================
-# 原来的单路版本
+# 单路版本
 # ========================================================
 class TrucyExcelReader(_TrucyExcelBase):
     @classmethod
@@ -365,11 +365,9 @@ class _TrucyExcelMultiReader(_TrucyExcelBase):
 
 
 # ========================================================
-# 6 路版本 (扩充为 6路)
-# 每一路输出 STRING、INT、FLOAT
-# 合计 18 个输出接口
+# 6 路版本 (TrucyExcelReader6)
 # ========================================================
-class TrucyExcelReader5(_TrucyExcelMultiReader):
+class TrucyExcelReader6(_TrucyExcelMultiReader):
     CHANNELS = 6
 
     RETURN_TYPES = (
@@ -393,8 +391,6 @@ class TrucyExcelReader5(_TrucyExcelMultiReader):
 
 # ========================================================
 # 10 路版本
-# 每一路输出 STRING、INT、FLOAT
-# 合计 30 个输出接口
 # ========================================================
 class TrucyExcelReader10(_TrucyExcelMultiReader):
     CHANNELS = 10
@@ -426,17 +422,14 @@ class TrucyExcelReader10(_TrucyExcelMultiReader):
     )
 
 
-# ========================================================
-# 独立注册映射
-# ========================================================
 NODE_CLASS_MAPPINGS = {
     "TrucyExcelReader": TrucyExcelReader,
-    "TrucyExcelReader5": TrucyExcelReader5,
+    "TrucyExcelReader6": TrucyExcelReader6,
     "TrucyExcelReader10": TrucyExcelReader10,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyExcelReader": "Excel-Reader-Trucy",
-    "TrucyExcelReader5": "Excel-Reader-6-Trucy",
+    "TrucyExcelReader6": "Excel-Reader-6-Trucy",
     "TrucyExcelReader10": "Excel-Reader-10-Trucy",
 }
