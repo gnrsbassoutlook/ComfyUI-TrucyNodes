@@ -248,17 +248,19 @@ class TrucyVideoCombine:
 
         # 处理自定义路径 (获取目标文件夹)
         target_custom_path = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else None
+        default_out_dir = folder_paths.get_output_directory()
+        has_custom = bool(target_custom_path and os.path.normcase(os.path.abspath(target_custom_path)) != os.path.normcase(os.path.abspath(default_out_dir)))
         
         # 2. 如果输入的是绿色 video 端口
         if video is not None:
-            internal_dir = folder_paths.get_output_directory() if save_output else folder_paths.get_temp_directory()
-            internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, save_output)
+            internal_dir = folder_paths.get_temp_directory() if has_custom else (default_out_dir if save_output else folder_paths.get_temp_directory())
+            internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, False if has_custom else save_output)
             self._embed_metadata(internal_path, self._metadata(prompt, original_extra))
             
             final_return_path = internal_path
             
-            # 镜像复制到自定义目录（加防同路径自复制及防占用保护）
-            if target_custom_path and os.path.isfile(internal_path):
+            # 复制到自定义目录（加防同路径自复制及防占用保护）
+            if has_custom and os.path.isfile(internal_path):
                 os.makedirs(target_custom_path, exist_ok=True)
                 dest_path = os.path.join(target_custom_path, os.path.basename(internal_path))
                 if os.path.normcase(os.path.abspath(internal_path)) != os.path.normcase(os.path.abspath(dest_path)):
@@ -274,7 +276,7 @@ class TrucyVideoCombine:
                 "gifs": [{
                     "filename": os.path.basename(internal_path),
                     "subfolder": "",
-                    "type": "output" if save_output else "temp",
+                    "type": "temp" if has_custom else ("output" if save_output else "temp"),
                     "format": "video/mp4",
                     "t": uuid.uuid4().hex[:6]
                 }]
@@ -289,6 +291,9 @@ class TrucyVideoCombine:
         workflow.setdefault("extra", {})["VHS_MetadataImage"] = False
         workflow["extra"]["VHS_KeepIntermediate"] = False
 
+        # 如果指定了独立自定义路径，让底层存入临时目录，避免污染 ComfyUI 默认的 output 路径
+        vhs_save_output = False if has_custom else save_output
+
         result = _VHSVideoCombine().combine_video(
             images=images,
             frame_rate=frame_rate,
@@ -296,7 +301,7 @@ class TrucyVideoCombine:
             filename_prefix=prefix,
             format=format,
             pingpong=pingpong,
-            save_output=save_output,
+            save_output=vhs_save_output,
             prompt=prompt,
             extra_pnginfo=extra_info,
             audio=audio,
@@ -307,7 +312,7 @@ class TrucyVideoCombine:
         )
 
         ui = result.get("ui", {})
-        filenames = result.get("result", ((save_output, []),))[0]
+        filenames = result.get("result", ((vhs_save_output, []),))[0]
         output_files = list(filenames[1])
         if not output_files:
             return {"ui": ui, "result": (None, "")}
@@ -332,7 +337,7 @@ class TrucyVideoCombine:
             
         final_return_path = internal_final_path
 
-        # 镜像复制到自定义目录（加防同路径自复制及防占用保护）
+        # 复制到自定义目录（加防同路径自复制及防占用保护）
         if target_custom_path and os.path.isfile(internal_final_path):
             os.makedirs(target_custom_path, exist_ok=True)
             dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
