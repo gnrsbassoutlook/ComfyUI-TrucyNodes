@@ -251,30 +251,32 @@ class TrucyVideoCombine:
         
         # 2. 如果输入的是绿色 video 端口
         if video is not None:
-            # 安全策略：永远先保存在 ComfyUI 默认文件夹，保证 UI 能读取！
             internal_dir = folder_paths.get_output_directory() if save_output else folder_paths.get_temp_directory()
             internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, save_output)
             self._embed_metadata(internal_path, self._metadata(prompt, original_extra))
             
             final_return_path = internal_path
             
-            # 镜像复制到自定义目录
+            # 镜像复制到自定义目录（加防同路径自复制及防占用保护）
             if target_custom_path and os.path.isfile(internal_path):
                 os.makedirs(target_custom_path, exist_ok=True)
                 dest_path = os.path.join(target_custom_path, os.path.basename(internal_path))
-                shutil.copy2(internal_path, dest_path)
-                final_return_path = dest_path # 最终输出外部路径用于后续节点
+                if os.path.normcase(os.path.abspath(internal_path)) != os.path.normcase(os.path.abspath(dest_path)):
+                    try:
+                        shutil.copy2(internal_path, dest_path)
+                    except Exception:
+                        pass
+                final_return_path = dest_path
 
             video_out = VideoFromFile(final_return_path) if VideoFromFile is not None else final_return_path
             
-            # UI 信息必须指向内部文件 (internal_path)，绝对不能用外部路径
             ui_info = {
                 "gifs": [{
                     "filename": os.path.basename(internal_path),
                     "subfolder": "",
                     "type": "output" if save_output else "temp",
                     "format": "video/mp4",
-                    "t": uuid.uuid4().hex[:6] # 防缓存死锁
+                    "t": uuid.uuid4().hex[:6]
                 }]
             }
             return {"ui": ui_info, "result": (video_out, final_return_path)}
@@ -287,12 +289,11 @@ class TrucyVideoCombine:
         workflow.setdefault("extra", {})["VHS_MetadataImage"] = False
         workflow["extra"]["VHS_KeepIntermediate"] = False
 
-        # 让肥猴的节点老老实实保存在 ComfyUI 内部目录，绝对不要把 custom_path 传给它
         result = _VHSVideoCombine().combine_video(
             images=images,
             frame_rate=frame_rate,
             loop_count=loop_count,
-            filename_prefix=prefix, # 去掉了会引起报错的路径拼接
+            filename_prefix=prefix,
             format=format,
             pingpong=pingpong,
             save_output=save_output,
@@ -331,24 +332,26 @@ class TrucyVideoCombine:
             
         final_return_path = internal_final_path
 
-        # 镜像复制到自定义目录
+        # 镜像复制到自定义目录（加防同路径自复制及防占用保护）
         if target_custom_path and os.path.isfile(internal_final_path):
             os.makedirs(target_custom_path, exist_ok=True)
             dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
-            shutil.copy2(internal_final_path, dest_path)
-            final_return_path = dest_path # 给后续节点返回外部绝对路径
+            if os.path.normcase(os.path.abspath(internal_final_path)) != os.path.normcase(os.path.abspath(dest_path)):
+                try:
+                    shutil.copy2(internal_final_path, dest_path)
+                except Exception:
+                    pass
+            final_return_path = dest_path
 
-        # 构建前端 UI 字典：保留原生字典里的 type, subfolder, filename (指向内部文件)，剔除外部 fullpath
+        # 构建前端 UI 字典
         preview = ui.get("gifs", [{}])[0]
         if preview:
             preview.pop("workflow", None)
             preview["filename"] = os.path.basename(internal_final_path)
-            # 关键：绝对不能把全路径设置为外部路径，否则 UI 报错加载不出
             if "fullpath" in preview:
                 del preview["fullpath"]
-            preview["t"] = uuid.uuid4().hex[:6] # 追加时间戳防止 UI 缓存旧视频
+            preview["t"] = uuid.uuid4().hex[:6]
 
-        # 构建标准的原生 VIDEO 对象输出 (携带目标真实绝对路径)
         abs_final_return = os.path.abspath(final_return_path)
         video_out = VideoFromFile(abs_final_return) if VideoFromFile is not None else abs_final_return
 

@@ -322,9 +322,12 @@ function addVideoPreview(nodeType) {
 
         element.style.width = "100%";
         previewWidget.value = { hidden: false, paused: false, params: {}, muted: true };
+        
+        // 容器设置相对定位
         previewWidget.parentEl = document.createElement("div");
         previewWidget.parentEl.className = "vhs_preview";
         previewWidget.parentEl.style.width = "100%";
+        previewWidget.parentEl.style.position = "relative";
         element.appendChild(previewWidget.parentEl);
 
         previewWidget.videoEl = document.createElement("video");
@@ -332,24 +335,87 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.loop = true;
         previewWidget.videoEl.muted = true;
         previewWidget.videoEl.style.width = "100%";
+        previewWidget.videoEl.style.display = "block";
+        previewWidget.videoEl.style.cursor = "pointer";
 
-        previewWidget.videoEl.addEventListener("loadedmetadata", () => {
-            previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
-            fitHeight(previewNode);
-        });
+        // =====================================================================
+        // 【变通核心】：悬浮胶囊控制按钮（绝对定位，平时隐藏，悬停浮现，不挡画布）
+        // =====================================================================
+        const playBtn = document.createElement("button");
+        playBtn.textContent = "⏸ 暂停";
+        playBtn.style.position = "absolute";
+        playBtn.style.bottom = "8px";
+        playBtn.style.left = "8px";
+        playBtn.style.padding = "3px 8px";
+        playBtn.style.fontSize = "11px";
+        playBtn.style.color = "#ffffff";
+        playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
+        playBtn.style.border = "1px solid rgba(255, 255, 255, 0.35)";
+        playBtn.style.borderRadius = "10px";
+        playBtn.style.cursor = "pointer";
+        playBtn.style.zIndex = "99";
+        playBtn.style.opacity = "0"; // 默认隐藏
+        playBtn.style.transition = "opacity 0.2s ease";
+        playBtn.style.pointerEvents = "auto";
+
+        const onMetadataLoaded = () => {
+            if (previewWidget.videoEl.videoWidth && previewWidget.videoEl.videoHeight) {
+                previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
+                fitHeight(previewNode);
+            }
+        };
+
+        previewWidget.videoEl.addEventListener("loadedmetadata", onMetadataLoaded);
+        previewWidget.videoEl.addEventListener("loadeddata", onMetadataLoaded);
 
         previewWidget.videoEl.addEventListener("error", () => {
             previewWidget.parentEl.hidden = true;
             fitHeight(previewNode);
         });
 
-        previewWidget.videoEl.onmouseenter = () => {
-            previewWidget.videoEl.muted = previewWidget.value.muted;
+        // 鼠标移入视频区：自动出声 + 浮现胶囊按钮
+        previewWidget.parentEl.onmouseenter = () => {
+            previewWidget.videoEl.muted = false;
+            playBtn.style.opacity = "1";
         };
-        previewWidget.videoEl.onmouseleave = () => {
+        // 鼠标移开视频区：静音 + 隐藏胶囊按钮（若已暂停则保持微显提示）
+        previewWidget.parentEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
+            playBtn.style.opacity = previewWidget.videoEl.paused ? "0.8" : "0";
         };
+
+        // 统一的播放/暂停切换动作
+        const togglePlay = (e) => {
+            if (e) {
+                e.stopPropagation();
+                e.preventDefault();
+            }
+            if (previewWidget.videoEl.paused) {
+                previewWidget.videoEl.play().catch(() => {});
+                previewWidget.value.paused = false;
+                playBtn.textContent = "⏸ 暂停";
+                playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
+            } else {
+                previewWidget.videoEl.pause();
+                previewWidget.value.paused = true;
+                playBtn.textContent = "▶ 播放";
+                playBtn.style.backgroundColor = "rgba(0, 150, 255, 0.75)";
+                playBtn.style.opacity = "1";
+            }
+        };
+
+        // 方式 1：点击专属胶囊按钮（100% 不会被画布拦截！）
+        playBtn.onclick = togglePlay;
+        playBtn.onpointerdown = (e) => e.stopPropagation();
+
+        // 方式 2：双击视频画面直接暂停/播放
+        previewWidget.videoEl.ondblclick = togglePlay;
+
+        // 方式 3：单击视频画面尝试触发
+        previewWidget.videoEl.onclick = togglePlay;
+
         previewWidget.parentEl.appendChild(previewWidget.videoEl);
+        previewWidget.parentEl.appendChild(playBtn);
 
         let timeout = null;
         previewNode.updateParameters = (params, forceUpdate) => {
@@ -384,7 +450,11 @@ function addVideoPreview(nodeType) {
             const format = query.format || "";
             if (format.startsWith("video/") || format === "folder") {
                 this.parentEl.hidden = this.value.hidden;
-                this.videoEl.autoplay = !this.value.paused && !this.value.hidden;
+                // 生成新视频时恢复自动播放状态与按钮文字
+                this.value.paused = false;
+                playBtn.textContent = "⏸ 暂停";
+                playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
+                this.videoEl.autoplay = !this.value.hidden;
                 this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(query)}`);
                 this.videoEl.hidden = false;
             }
@@ -518,9 +588,6 @@ app.registerExtension({
             return;
         }
 
-        // =====================================================================
-        // 【关键修复点】：补齐 nodeData.output 元数据，免疫 audio_analyzer 报错
-        // =====================================================================
         if (!nodeData.output) {
             nodeData.output = ["VHS_FILENAMES", "STRING"];
         }
@@ -540,7 +607,6 @@ app.registerExtension({
         addVAEInputToggle(nodeType);
 
         chainCallback(nodeType.prototype, "onNodeCreated", function () {
-            // 确保创建节点实例时其 outputs 结构完全符合 LiteGraph 规范
             if (!this.outputs || this.outputs.length === 0) {
                 this.outputs = [
                     { name: "video", type: "VHS_FILENAMES", links: null },
