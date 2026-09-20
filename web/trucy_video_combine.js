@@ -192,7 +192,7 @@ function useKVState(nodeType) {
                     widget.value = widgetDict[widget.name];
                     widget.callback?.(widget.value);
                 } else {
-                    const nodeTypeInfo = LiteGraph.getNodeType(this.type);
+                    const nodeTypeInfo = LiteGraph.getNodeType(this.type) || LiteGraph.registered_node_types?.[this.type];
                     const nodeInputs = nodeTypeInfo?.nodeData?.input;
                     let initialValue = null;
 
@@ -322,6 +322,7 @@ function addVideoPreview(nodeType) {
 
         element.style.width = "100%";
         previewWidget.value = { hidden: false, paused: false, params: {}, muted: true };
+        
         previewWidget.parentEl = document.createElement("div");
         previewWidget.parentEl.className = "vhs_preview";
         previewWidget.parentEl.style.width = "100%";
@@ -332,23 +333,49 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.loop = true;
         previewWidget.videoEl.muted = true;
         previewWidget.videoEl.style.width = "100%";
+        previewWidget.videoEl.style.display = "block";
+        previewWidget.videoEl.style.cursor = "pointer";
 
-        previewWidget.videoEl.addEventListener("loadedmetadata", () => {
-            previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
-            fitHeight(previewNode);
-        });
+        const onMetadataLoaded = () => {
+            if (previewWidget.videoEl.videoWidth && previewWidget.videoEl.videoHeight) {
+                previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
+                fitHeight(previewNode);
+            }
+        };
+
+        previewWidget.videoEl.addEventListener("loadedmetadata", onMetadataLoaded);
+        previewWidget.videoEl.addEventListener("loadeddata", onMetadataLoaded);
 
         previewWidget.videoEl.addEventListener("error", () => {
             previewWidget.parentEl.hidden = true;
             fitHeight(previewNode);
         });
 
-        previewWidget.videoEl.onmouseenter = () => {
-            previewWidget.videoEl.muted = previewWidget.value.muted;
+        // 鼠标移入视频出声，移出静音
+        previewWidget.parentEl.onmouseenter = () => {
+            previewWidget.videoEl.muted = false;
         };
-        previewWidget.videoEl.onmouseleave = () => {
+        previewWidget.parentEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
         };
+
+        // 视频画面双击或单击切换播放/暂停（完全不添加多余 DOM，不影响界面）
+        const togglePlay = (e) => {
+            if (e) {
+                e.stopPropagation();
+            }
+            if (previewWidget.videoEl.paused) {
+                previewWidget.videoEl.play().catch(() => {});
+                previewWidget.value.paused = false;
+            } else {
+                previewWidget.videoEl.pause();
+                previewWidget.value.paused = true;
+            }
+        };
+
+        previewWidget.videoEl.ondblclick = togglePlay;
+        previewWidget.videoEl.onclick = togglePlay;
+
         previewWidget.parentEl.appendChild(previewWidget.videoEl);
 
         let timeout = null;
@@ -384,7 +411,8 @@ function addVideoPreview(nodeType) {
             const format = query.format || "";
             if (format.startsWith("video/") || format === "folder") {
                 this.parentEl.hidden = this.value.hidden;
-                this.videoEl.autoplay = !this.value.paused && !this.value.hidden;
+                this.value.paused = false;
+                this.videoEl.autoplay = !this.value.hidden;
                 this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(query)}`);
                 this.videoEl.hidden = false;
             }
@@ -406,22 +434,30 @@ function addVideoPreview(nodeType) {
 
 function addFormatWidgets(nodeType) {
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
-        let formatWidget = null;
-        let formatWidgetIndex = -1;
-
-        for (let index = 0; index < this.widgets.length; index++) {
-            if (this.widgets[index].name === "format") {
-                formatWidget = this.widgets[index];
-                formatWidgetIndex = index + 1;
-                break;
+        // =====================================================================
+        // 【核心召回保底机制】：如果发现 frame_rate 被丢掉，强制生成并将其精准置顶！
+        // =====================================================================
+        let frWidget = this.widgets?.find(w => w.name === "frame_rate");
+        if (!frWidget) {
+            const nodeTypeInfo = LiteGraph.getNodeType(this.type) || LiteGraph.registered_node_types?.[this.type];
+            const frConfig = nodeTypeInfo?.nodeData?.input?.required?.frame_rate || ["FLOAT", { default: 16.0, min: 1.0, step: 1.0 }];
+            frWidget = createVhsNumberWidget(this, "frame_rate", frConfig, false);
+            // 将 frame_rate 移至最首位
+            const curIdx = this.widgets.indexOf(frWidget);
+            if (curIdx > 0) {
+                this.widgets.splice(curIdx, 1);
+                this.widgets.unshift(frWidget);
             }
         }
+
+        const formatWidget = this.widgets?.find((item) => item.name === "format");
         if (!formatWidget) return;
 
         let formatWidgetsCount = 0;
 
-        chainCallback(formatWidget, "callback", (value) => {
-            const nodeInputs = LiteGraph.registered_node_types[this.type]?.nodeData?.input;
+        const updateFormatDefinitions = (value) => {
+            const nodeTypeInfo = LiteGraph.getNodeType(this.type) || LiteGraph.registered_node_types?.[this.type];
+            const nodeInputs = nodeTypeInfo?.nodeData?.input;
             const formats = (nodeInputs?.required?.format ?? nodeInputs?.optional?.format)?.[1]?.formats;
             const definitions = formats?.[value] ?? [];
             const newWidgets = [];
@@ -437,18 +473,23 @@ function addFormatWidgets(nodeType) {
                 newWidgets.push(widget);
             }
 
-            const removed = this.widgets.splice(formatWidgetIndex, formatWidgetsCount, ...newWidgets);
+            // 精准定位在 format 后面，绝对不碰前排的 frame_rate
+            const currentFormatIndex = this.widgets.findIndex((item) => item.name === "format");
+            if (currentFormatIndex === -1) return;
+            const insertIndex = currentFormatIndex + 1;
+
+            const removed = this.widgets.splice(insertIndex, formatWidgetsCount, ...newWidgets);
             const newNames = new Set(newWidgets.map((widget) => widget.name));
 
             for (const widget of removed) {
                 widget?.onRemove?.();
                 if (newNames.has(widget?.name)) continue;
-                const slot = this.inputs.findIndex((input) => input.name === widget?.name);
+                const slot = this.inputs?.findIndex((input) => input.name === widget?.name);
                 if (slot >= 0) this.removeInput(slot);
             }
 
             for (const widget of newWidgets) {
-                const existingInput = this.inputs.find((input) => input.name === widget.name);
+                const existingInput = this.inputs?.find((input) => input.name === widget.name);
                 if (existingInput) {
                     setWidgetConfig(existingInput, widget.config);
                 } else {
@@ -458,7 +499,15 @@ function addFormatWidgets(nodeType) {
 
             fitHeight(this);
             formatWidgetsCount = newWidgets.length;
+        };
+
+        chainCallback(formatWidget, "callback", (value) => {
+            updateFormatDefinitions(value);
         });
+
+        if (formatWidget.value) {
+            updateFormatDefinitions(formatWidget.value);
+        }
     });
 }
 
@@ -518,9 +567,6 @@ app.registerExtension({
             return;
         }
 
-        // =====================================================================
-        // 【关键修复点】：补齐 nodeData.output 元数据，免疫 audio_analyzer 报错
-        // =====================================================================
         if (!nodeData.output) {
             nodeData.output = ["VHS_FILENAMES", "STRING"];
         }
@@ -540,7 +586,6 @@ app.registerExtension({
         addVAEInputToggle(nodeType);
 
         chainCallback(nodeType.prototype, "onNodeCreated", function () {
-            // 确保创建节点实例时其 outputs 结构完全符合 LiteGraph 规范
             if (!this.outputs || this.outputs.length === 0) {
                 this.outputs = [
                     { name: "video", type: "VHS_FILENAMES", links: null },

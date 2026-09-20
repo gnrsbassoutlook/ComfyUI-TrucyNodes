@@ -134,7 +134,6 @@ class TrucyVideoCombine:
                     pass
 
     def _clean_audio_suffix(self, file_path):
-        """如果文件名以 -audio 结尾，重命名去掉 -audio"""
         if not os.path.isfile(file_path):
             return file_path
         dir_name, base_name = os.path.split(file_path)
@@ -155,12 +154,10 @@ class TrucyVideoCombine:
         return file_path
 
     def _process_video_input(self, video, audio, target_dir, filename_prefix, save_output):
-        """处理通过 VIDEO 输入的场景"""
         ffmpeg = _ffmpeg_path()
         if not ffmpeg:
             raise RuntimeError("ffmpeg 未找到，请确保系统中已正确配置 ffmpeg。")
 
-        # 1. 尝试获取输入视频的物理文件路径
         in_video_path = None
         temp_input_to_clean = None
         if hasattr(video, "get_stream_source"):
@@ -179,13 +176,11 @@ class TrucyVideoCombine:
             else:
                 raise ValueError("无法解析输入的 VIDEO 对象数据源。")
 
-        # 2. 计算输出目标文件名
-        out_folder = target_dir if save_output else folder_paths.get_temp_directory()
+        out_folder = target_dir
         os.makedirs(out_folder, exist_ok=True)
         out_filename = f"{filename_prefix}_{uuid.uuid4().hex[:8]}.mp4"
         final_path = os.path.join(out_folder, out_filename)
 
-        # 3. 处理音频混流
         temp_audio_path = None
         if audio is not None and "waveform" in audio and "sample_rate" in audio:
             waveform = audio["waveform"]
@@ -194,7 +189,6 @@ class TrucyVideoCombine:
                 temp_audio_path = f.name
             torchaudio.save(temp_audio_path, waveform.squeeze(0), sample_rate=sample_rate)
 
-            # 视频使用流复制，合并新音频
             cmd = [
                 ffmpeg, "-y", "-v", "error",
                 "-i", in_video_path,
@@ -207,7 +201,6 @@ class TrucyVideoCombine:
                 final_path
             ]
         else:
-            # 仅复制/重命名视频流
             cmd = [
                 ffmpeg, "-y", "-v", "error",
                 "-i", in_video_path,
@@ -238,7 +231,6 @@ class TrucyVideoCombine:
                       images=None, video=None, audio=None, custom_path=r"D:\ComfyUI-Output",
                       prompt=None, extra_pnginfo=None, unique_id=None, **format_values):
 
-        # 1. 严格检查 images 与 video 输入
         if images is None and video is None:
             raise ValueError("【Trucy 提示】: 'images' 和 'video' 输入至少需要连接一个！")
         if images is not None and video is not None:
@@ -246,35 +238,37 @@ class TrucyVideoCombine:
 
         original_extra = extra_pnginfo or {}
 
-        # 处理自定义路径 (获取目标文件夹)
         target_custom_path = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else None
-        
+        default_out_dir = folder_paths.get_output_directory()
+        has_custom = bool(target_custom_path and os.path.normcase(os.path.abspath(target_custom_path)) != os.path.normcase(os.path.abspath(default_out_dir)))
+
         # 2. 如果输入的是绿色 video 端口
         if video is not None:
-            # 安全策略：永远先保存在 ComfyUI 默认文件夹，保证 UI 能读取！
-            internal_dir = folder_paths.get_output_directory() if save_output else folder_paths.get_temp_directory()
-            internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, save_output)
+            internal_dir = folder_paths.get_temp_directory() if has_custom else (default_out_dir if save_output else folder_paths.get_temp_directory())
+            internal_path = self._process_video_input(video, audio, internal_dir, filename_prefix, False if has_custom else save_output)
             self._embed_metadata(internal_path, self._metadata(prompt, original_extra))
             
             final_return_path = internal_path
             
-            # 镜像复制到自定义目录
-            if target_custom_path and os.path.isfile(internal_path):
-                os.makedirs(target_custom_path, exist_ok=True)
-                dest_path = os.path.join(target_custom_path, os.path.basename(internal_path))
-                shutil.copy2(internal_path, dest_path)
-                final_return_path = dest_path # 最终输出外部路径用于后续节点
+            if has_custom and os.path.isfile(internal_path):
+                try:
+                    os.makedirs(target_custom_path, exist_ok=True)
+                    dest_path = os.path.join(target_custom_path, os.path.basename(internal_path))
+                    if os.path.normcase(os.path.abspath(internal_path)) != os.path.normcase(os.path.abspath(dest_path)):
+                        shutil.copy2(internal_path, dest_path)
+                    final_return_path = dest_path
+                except Exception as e:
+                    print(f"[TrucyVideoCombine] 复制到自定义路径异常: {e}")
 
             video_out = VideoFromFile(final_return_path) if VideoFromFile is not None else final_return_path
             
-            # UI 信息必须指向内部文件 (internal_path)，绝对不能用外部路径
             ui_info = {
                 "gifs": [{
                     "filename": os.path.basename(internal_path),
                     "subfolder": "",
-                    "type": "output" if save_output else "temp",
+                    "type": "temp" if has_custom else ("output" if save_output else "temp"),
                     "format": "video/mp4",
-                    "t": uuid.uuid4().hex[:6] # 防缓存死锁
+                    "t": uuid.uuid4().hex[:6]
                 }]
             }
             return {"ui": ui_info, "result": (video_out, final_return_path)}
@@ -287,15 +281,16 @@ class TrucyVideoCombine:
         workflow.setdefault("extra", {})["VHS_MetadataImage"] = False
         workflow["extra"]["VHS_KeepIntermediate"] = False
 
-        # 让肥猴的节点老老实实保存在 ComfyUI 内部目录，绝对不要把 custom_path 传给它
+        vhs_save_output = False if has_custom else save_output
+
         result = _VHSVideoCombine().combine_video(
             images=images,
             frame_rate=frame_rate,
             loop_count=loop_count,
-            filename_prefix=prefix, # 去掉了会引起报错的路径拼接
+            filename_prefix=prefix,
             format=format,
             pingpong=pingpong,
-            save_output=save_output,
+            save_output=vhs_save_output,
             prompt=prompt,
             extra_pnginfo=extra_info,
             audio=audio,
@@ -306,14 +301,13 @@ class TrucyVideoCombine:
         )
 
         ui = result.get("ui", {})
-        filenames = result.get("result", ((save_output, []),))[0]
+        filenames = result.get("result", ((vhs_save_output, []),))[0]
         output_files = list(filenames[1])
         if not output_files:
             return {"ui": ui, "result": (None, "")}
 
         internal_final_path = output_files[-1]
 
-        # 清理原版肥猴可能产生的中间临时文件
         for path in output_files[:-1]:
             try:
                 if os.path.isfile(path):
@@ -321,34 +315,32 @@ class TrucyVideoCombine:
             except OSError:
                 pass
 
-        # 自动剔除文件名中的 -audio
         internal_final_path = self._clean_audio_suffix(internal_final_path)
 
-        # 嵌入元数据
         video_extensions = {".avi", ".m4v", ".mkv", ".mov", ".mp4", ".webm"}
         if os.path.isfile(internal_final_path) and Path(internal_final_path).suffix.lower() in video_extensions:
             self._embed_metadata(internal_final_path, self._metadata(prompt, original_extra))
             
         final_return_path = internal_final_path
 
-        # 镜像复制到自定义目录
         if target_custom_path and os.path.isfile(internal_final_path):
-            os.makedirs(target_custom_path, exist_ok=True)
-            dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
-            shutil.copy2(internal_final_path, dest_path)
-            final_return_path = dest_path # 给后续节点返回外部绝对路径
+            try:
+                os.makedirs(target_custom_path, exist_ok=True)
+                dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
+                if os.path.normcase(os.path.abspath(internal_final_path)) != os.path.normcase(os.path.abspath(dest_path)):
+                    shutil.copy2(internal_final_path, dest_path)
+                final_return_path = dest_path
+            except Exception as e:
+                print(f"[TrucyVideoCombine] 复制到自定义路径异常: {e}")
 
-        # 构建前端 UI 字典：保留原生字典里的 type, subfolder, filename (指向内部文件)，剔除外部 fullpath
         preview = ui.get("gifs", [{}])[0]
         if preview:
             preview.pop("workflow", None)
             preview["filename"] = os.path.basename(internal_final_path)
-            # 关键：绝对不能把全路径设置为外部路径，否则 UI 报错加载不出
             if "fullpath" in preview:
                 del preview["fullpath"]
-            preview["t"] = uuid.uuid4().hex[:6] # 追加时间戳防止 UI 缓存旧视频
+            preview["t"] = uuid.uuid4().hex[:6]
 
-        # 构建标准的原生 VIDEO 对象输出 (携带目标真实绝对路径)
         abs_final_return = os.path.abspath(final_return_path)
         video_out = VideoFromFile(abs_final_return) if VideoFromFile is not None else abs_final_return
 

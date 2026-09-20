@@ -4,31 +4,32 @@ import { ComfyWidgets } from "../../scripts/widgets.js";
 app.registerExtension({
     name: "ComfyUI.AudioDetector.UI",
     async beforeRegisterNodeDef(nodeType, nodeData, app) {
-        // 绑定到我们在 Python 中定义的类名
+        // 精准绑定到音频检测网关节点
         if (nodeData.name === "AudioLengthDetector") {
             const onExecuted = nodeType.prototype.onExecuted;
             nodeType.prototype.onExecuted = function(message) {
                 onExecuted?.apply(this, arguments);
                 
-                // 监听Python传回的 "text"
-                if (message.text) {
-                    // 查找是否已经创建了信息展示框
+                // 监听 Python 后端传回的 ui.text
+                if (message?.text) {
                     let widget = this.widgets?.find(w => w.name === "result_info");
                     
-                    // 如果没有，就新建一个多行字符串控件
+                    // 第一次运行时动态创建展示框
                     if (!widget) {
                         widget = ComfyWidgets["STRING"](this, "result_info", ["STRING", { multiline: true }], app).widget;
-                        // 设置为只读并略微变灰，以作为纯数据显示用
                         widget.inputEl.readOnly = true;
-                        widget.inputEl.style.opacity = 0.7;
-                        widget.inputEl.style.backgroundColor = "transparent";
+                        widget.inputEl.style.opacity = "0.85";
+                        widget.inputEl.style.backgroundColor = "rgba(0, 0, 0, 0.25)";
+                        widget.inputEl.style.color = "#00FF99"; // 科技绿荧光文字，视觉更清晰
+                        widget.inputEl.style.fontWeight = "bold";
                     }
                     
-                    // 将计算好的文字展示上去
-                    widget.value = message.text.join("");
+                    // 填入计算结果文字
+                    widget.value = message.text.join("\n");
                     
-                    // 自动调整节点尺寸以适应文字高度
+                    // 自动适应尺寸并强制重绘画布（避免节点变白或不刷新）
                     this.onResize?.(this.computeSize());
+                    this.setDirtyCanvas(true, true);
                 }
             };
         }
