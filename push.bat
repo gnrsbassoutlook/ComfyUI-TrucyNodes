@@ -1,73 +1,97 @@
 @echo off
 chcp 65001 >nul
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
-echo ==========================================
-echo " 🚀 ComfyUI‑TrucyNodes GitHub 自动推送脚本(HTTPS模式)"
-echo ==========================================
-:: ========== HTTPS模式，不需要SSH密钥 ==========
-:: SSH地址已注释，本脚本使用https + PAT token
-:: set REMOTE_SSH=git@github.com:gnrsbassoutlook/ComfyUI-TrucyNodes.git
-set REMOTE_SSH=https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes.git
 
+echo ==========================================
+echo   ComfyUI-TrucyNodes GitHub 自动推送脚本
+echo ==========================================
+
+set REMOTE_URL=https://github.com/gnrsbassoutlook/ComfyUI-TrucyNodes.git
+
+:: 1. 检查是否初始化仓库
 if not exist ".git" (
-    echo 📦 正在初始化 Git 仓库...
+    echo [INFO] 正在初始化 Git 仓库...
     git init
     git branch -M main
-    git remote add origin %REMOTE_SSH%
+    git remote add origin %REMOTE_URL%
 )
 
-set "REMOTE_URL="
-for /f "delims=" %%a in ('git remote get-url origin 2^>nul') do set REMOTE_URL=%%a
-if "!REMOTE_URL!"=="" (
-    git remote add origin %REMOTE_SSH%
-) else if NOT "!REMOTE_URL!"=="%REMOTE_SSH%" (
-    echo 🔄 更新origin远程地址为: %REMOTE_SSH%
-    git remote set-url origin %REMOTE_SSH%
+:: 2. 确保 origin 地址正确
+for /f "delims=" %%a in ('git remote get-url origin 2^>nul') do set CURRENT_URL=%%a
+if "!CURRENT_URL!"=="" (
+    git remote add origin %REMOTE_URL%
+) else if not "!CURRENT_URL!"=="%REMOTE_URL%" (
+    echo [INFO] 更新 origin 远程地址为: %REMOTE_URL%
+    git remote set-url origin %REMOTE_URL%
 )
+
+:: 3. 检查是否有卡死的 rebase 状态
+if exist ".git\rebase-merge" (
+    echo [WARN] 检测到卡死的 Rebase 状态，正在自动恢复...
+    git rebase --abort >nul 2>&1
+    git checkout main >nul 2>&1
+)
+
+:: 4. 确保当前处于 main 分支
+git checkout main >nul 2>&1
 
 echo.
-echo 📊 当前文件改动状态：
+echo [STATUS] 当前文件改动状态：
 git status -s
 set "STATUS_OUT="
 for /f "delims=" %%i in ('git status -s') do set STATUS_OUT=%%i
-echo.
 
-:: 工作区无修改直接退出，不执行提交推送
 if "!STATUS_OUT!"=="" (
-    echo ✅ 检测到 working tree clean，没有文件改动，无需提交推送。
     echo.
-    pause >nul
+    echo [OK] 工作区非常干净，没有文件被改动，无需重复提交。
+    echo.
+    pause
     exit /b
 )
 
-setlocal enabledelayedexpansion
+echo.
 set "msg="
-set /p msg=👉 请输入 Commit 说明 (直接回车默认: Auto update):
+set /p msg=请输入 Commit 说明 (直接回车默认: Auto update): 
 if "!msg!"=="" (
     for /f %%a in ('powershell Get-Date -Format "yyyy-MM-dd HH:mm:ss"') do set msg=Auto update: %%a
 )
 
 echo.
-echo ⏳ 正在提交并推送到 GitHub...
+echo [INFO] 正在提交并尝试推送到 GitHub...
 git add .
-git commit -m "!msg!" --allow-empty
-git push -u origin main
+git commit -m "!msg!"
 
+git push origin main
 if %errorlevel% equ 0 (
     echo.
-    echo 🎉 推送成功！代码已同步至 GitHub。
-) else (
-    echo.
-    echo ⚠️ 推送失败，尝试拉取远程最新代码再推送...
-    git pull origin main --rebase
-    if %errorlevel% neq 0 (
-        echo ❌ 操作失败。
-        echo 提示：如果报错403/认证失败，请检查你的PAT Token；
-        echo 如果是真实代码冲突，需要你手动解决冲突。
-    ) else (
-        git push -u origin main
+    echo [SUCCESS] 推送成功！代码已同步至 GitHub。
+    goto END
+)
+
+echo.
+echo [WARN] 直接推送被拒绝（远程有更新），正在尝试拉取合并...
+git pull origin main --rebase
+if %errorlevel% equ 0 (
+    echo [INFO] 远程更新拉取成功，正在重新推送...
+    git push origin main
+    if !errorlevel! equ 0 (
+        echo.
+        echo [SUCCESS] 推送成功！代码已同步至 GitHub。
+        goto END
     )
 )
 
+:: 如果 rebase 失败（产生冲突）
+echo.
+echo [ERROR] 拉取合并产生代码冲突，已自动撤销拉取，避免仓库卡死！
+git rebase --abort >nul 2>&1
+echo -------------------------------------------------------------
+echo 提示：如果你确认本地调好的代码就是最新的，不需要保留远程差异，
+echo 你可以直接在终端运行以下命令强制覆盖远程：
+echo     git push -f origin main
+echo -------------------------------------------------------------
+
+:END
 echo.
 pause
