@@ -352,14 +352,18 @@ class TrucyTextToNumber:
     RETURN_NAMES = ("string", "int", "float", "boolean")
     FUNCTION = "convert"
     CATEGORY = "TrucyNodes/Text"
+    OUTPUT_NODE = True  # 允许直接执行并将结果回传前端
 
     def convert(self, text):
         res_i, res_f = extract_numbers(text)
         clean_text = text.strip().lower()
         if clean_text in ["0", "0.0", "", "none", "null", "false"]: res_b = False
         else: res_b = True
-        return (text, res_i, res_f, res_b)
-
+        
+        # 格式化呈现：短内容优先排在同一行，超出宽度前端会自动换行到第2行
+        display_txt = f"str = {text}, int = {res_i}, float = {res_f}"
+        return {"ui": {"text": [display_txt]}, "result": (text, res_i, res_f, res_b)}
+        
 # ======================================================================
 # 5. 智能文本切割器 (TrucyTextSlicerSmart)
 # ======================================================================
