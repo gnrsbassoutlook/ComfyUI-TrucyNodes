@@ -326,6 +326,7 @@ function addVideoPreview(nodeType) {
         previewWidget.parentEl = document.createElement("div");
         previewWidget.parentEl.className = "vhs_preview";
         previewWidget.parentEl.style.width = "100%";
+        previewWidget.parentEl.style.position = "relative";
         element.appendChild(previewWidget.parentEl);
 
         previewWidget.videoEl = document.createElement("video");
@@ -336,10 +337,33 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.style.display = "block";
         previewWidget.videoEl.style.cursor = "pointer";
 
+        // =====================================================================
+        // 【精致胶囊按钮】：默认隐藏不抢占空间，仅在画面展开时位于左下角
+        // =====================================================================
+        const playBtn = document.createElement("button");
+        playBtn.textContent = "⏸ 暂停";
+        playBtn.style.position = "absolute";
+        playBtn.style.bottom = "8px";
+        playBtn.style.left = "8px";
+        playBtn.style.padding = "3px 8px";
+        playBtn.style.fontSize = "11px";
+        playBtn.style.color = "#ffffff";
+        playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
+        playBtn.style.border = "1px solid rgba(255, 255, 255, 0.35)";
+        playBtn.style.borderRadius = "10px";
+        playBtn.style.cursor = "pointer";
+        playBtn.style.zIndex = "99";
+        playBtn.style.opacity = "0";
+        playBtn.style.display = "none"; // 初始彻底隐藏，绝不漂移到标题栏
+        playBtn.style.transition = "opacity 0.2s ease";
+        playBtn.style.pointerEvents = "auto";
+
         const onMetadataLoaded = () => {
             if (previewWidget.videoEl.videoWidth && previewWidget.videoEl.videoHeight) {
                 previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
                 fitHeight(previewNode);
+                // 只有视频画面真正准备好后，才允许胶囊按钮出现
+                playBtn.style.display = "block";
             }
         };
 
@@ -348,35 +372,56 @@ function addVideoPreview(nodeType) {
 
         previewWidget.videoEl.addEventListener("error", () => {
             previewWidget.parentEl.hidden = true;
+            playBtn.style.display = "none";
             fitHeight(previewNode);
         });
 
-        // 鼠标移入视频出声，移出静音
+        // 鼠标悬停出声 + 浮现胶囊
         previewWidget.parentEl.onmouseenter = () => {
             previewWidget.videoEl.muted = false;
-        };
-        previewWidget.parentEl.onmouseleave = () => {
-            previewWidget.videoEl.muted = true;
+            if (previewWidget.videoEl.src && previewWidget.videoEl.videoWidth > 0) {
+                playBtn.style.display = "block";
+                playBtn.style.opacity = "1";
+            }
         };
 
-        // 视频画面双击或单击切换播放/暂停（完全不添加多余 DOM，不影响界面）
+        // 鼠标移出静音 + 胶囊淡出（暂停时保留半透明微显提示）
+        previewWidget.parentEl.onmouseleave = () => {
+            previewWidget.videoEl.muted = true;
+            if (playBtn.style.display !== "none") {
+                playBtn.style.opacity = previewWidget.videoEl.paused ? "0.8" : "0";
+            }
+        };
+
+        // 统一的播放/暂停动作
         const togglePlay = (e) => {
             if (e) {
                 e.stopPropagation();
+                e.preventDefault();
             }
             if (previewWidget.videoEl.paused) {
                 previewWidget.videoEl.play().catch(() => {});
                 previewWidget.value.paused = false;
+                playBtn.textContent = "⏸ 暂停";
+                playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
             } else {
                 previewWidget.videoEl.pause();
                 previewWidget.value.paused = true;
+                playBtn.textContent = "▶ 播放";
+                playBtn.style.backgroundColor = "rgba(0, 120, 255, 0.75)";
+                playBtn.style.opacity = "1";
             }
         };
 
+        playBtn.onclick = togglePlay;
+        playBtn.onpointerdown = (e) => e.stopPropagation();
+
+        // 视频画面双击或单击也能切换
         previewWidget.videoEl.ondblclick = togglePlay;
         previewWidget.videoEl.onclick = togglePlay;
 
         previewWidget.parentEl.appendChild(previewWidget.videoEl);
+        previewWidget.parentEl.appendChild(playBtn);
 
         let timeout = null;
         previewNode.updateParameters = (params, forceUpdate) => {
@@ -412,6 +457,8 @@ function addVideoPreview(nodeType) {
             if (format.startsWith("video/") || format === "folder") {
                 this.parentEl.hidden = this.value.hidden;
                 this.value.paused = false;
+                playBtn.textContent = "⏸ 暂停";
+                playBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
                 this.videoEl.autoplay = !this.value.hidden;
                 this.videoEl.src = api.apiURL(`/view?${new URLSearchParams(query)}`);
                 this.videoEl.hidden = false;
@@ -434,15 +481,12 @@ function addVideoPreview(nodeType) {
 
 function addFormatWidgets(nodeType) {
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
-        // =====================================================================
-        // 【核心召回保底机制】：如果发现 frame_rate 被丢掉，强制生成并将其精准置顶！
-        // =====================================================================
+        // 保底补回 frame_rate 控件（如果丢失）
         let frWidget = this.widgets?.find(w => w.name === "frame_rate");
         if (!frWidget) {
             const nodeTypeInfo = LiteGraph.getNodeType(this.type) || LiteGraph.registered_node_types?.[this.type];
             const frConfig = nodeTypeInfo?.nodeData?.input?.required?.frame_rate || ["FLOAT", { default: 16.0, min: 1.0, step: 1.0 }];
             frWidget = createVhsNumberWidget(this, "frame_rate", frConfig, false);
-            // 将 frame_rate 移至最首位
             const curIdx = this.widgets.indexOf(frWidget);
             if (curIdx > 0) {
                 this.widgets.splice(curIdx, 1);
@@ -473,7 +517,6 @@ function addFormatWidgets(nodeType) {
                 newWidgets.push(widget);
             }
 
-            // 精准定位在 format 后面，绝对不碰前排的 frame_rate
             const currentFormatIndex = this.widgets.findIndex((item) => item.name === "format");
             if (currentFormatIndex === -1) return;
             const insertIndex = currentFormatIndex + 1;
