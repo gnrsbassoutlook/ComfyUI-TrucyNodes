@@ -22,6 +22,11 @@ except ImportError:
     except ImportError:
         VideoFromFile = None
 
+try:
+    from comfy.utils import ProgressBar
+except Exception:
+    ProgressBar = None
+
 from .vhs_compat.nodes import VideoCombine as _VHSVideoCombine
 from .vhs_compat.nodes import get_video_formats as _get_video_formats
 from .vhs_compat import server as _vhs_server  # noqa: F401
@@ -38,11 +43,22 @@ def _ffmpeg_path():
         return shutil.which("ffmpeg")
 
 
+def _supports_nvenc(ff):
+    """检测当前 ffmpeg 是否支持 NVIDIA GPU 硬件加速 (h264_nvenc)"""
+    try:
+        r = subprocess.run([ff, '-hide_banner', '-encoders'],
+                           capture_output=True, text=True, timeout=10)
+        return 'h264_nvenc' in (r.stdout + r.stderr)
+    except Exception:
+        return False
+
+
 def _write_ffmetadata(metadata, path):
     def escape(key, value):
         text = json.dumps(value, ensure_ascii=False)
         text = text.replace("\\", "\\\\").replace(";", "\\;").replace("#", "\\#")
-        text = text.replace("=", "\\=").replace("\n", "\\\n")
+        text = text.replace("=", "\\=")
+        text = text.replace("\n", "\\\n")
         return f"{key}={text}"
 
     with open(path, "w", encoding="utf-8") as stream:
@@ -321,7 +337,7 @@ class TrucyVideoCombine:
         if os.path.isfile(internal_final_path) and Path(internal_final_path).suffix.lower() in video_extensions:
             self._embed_metadata(internal_final_path, self._metadata(prompt, original_extra))
             
-        final_return_path = internal_final_path
+            final_return_path = internal_final_path
 
         if target_custom_path and os.path.isfile(internal_final_path):
             try:
@@ -347,10 +363,180 @@ class TrucyVideoCombine:
         return {"ui": ui, "result": (video_out, abs_final_return)}
 
 
+# ==============================================================================
+# 🚀 新增节点：TrucyVideoCombineFast（完全继承原节点，引入 Topaz 极速批次管道）
+# ==============================================================================
+class TrucyVideoCombineFast(TrucyVideoCombine):
+    """继承原节点全部接口与前端特性，但针对 images 序列合成引入 Topaz 级快速批次推流与 GPU 硬件编码。"""
+
+    def _fast_mux_audio(self, ff, video_path, audio):
+        """流复制极速合并音频（耗时 < 0.05s）"""
+        try:
+            wf = audio.get('waveform')
+            sr = int(audio.get('sample_rate', 44100))
+        except Exception:
+            return video_path
+
+        if wf is None or wf.numel() == 0:
+            return video_path
+
+        wf = wf.detach().cpu().float()
+        if wf.dim() == 3:
+            wf = wf.squeeze(0)
+        channels = wf.size(0)
+        audio_data = wf.transpose(0, 1).contiguous().numpy().tobytes()
+
+        out_path = video_path[:-4] + '-audio.mp4'
+        mux_args = [ff, '-v', 'error', '-y', '-i', video_path,
+                    '-ar', str(sr), '-ac', str(channels),
+                    '-f', 'f32le', '-i', '-',
+                    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k',
+                    '-shortest', out_path]
+        try:
+            r = subprocess.run(mux_args, input=audio_data,
+                               capture_output=True, timeout=600)
+            if r.returncode == 0 and os.path.isfile(out_path):
+                try:
+                    os.remove(video_path)
+                except OSError:
+                    pass
+                return out_path
+        except Exception as e:
+            print(f'[TrucyVideoCombineFast] 音频合并异常: {e}')
+        return video_path
+
+    def combine_video(self, frame_rate=16.0, loop_count=0, filename_prefix="TrucyVideo",
+                      format="video/h264-mp4", pingpong=False, save_output=True,
+                      images=None, video=None, audio=None, custom_path=r"D:\ComfyUI-Output",
+                      prompt=None, extra_pnginfo=None, unique_id=None, **format_values):
+
+        # 1. 如果输入的是 video，或者选择了非常规非 mp4 格式，直接走父类的标准流程
+        if video is not None or format != "video/h264-mp4" or images is None or images.size(0) == 0:
+            return super().combine_video(
+                frame_rate=frame_rate, loop_count=loop_count, filename_prefix=filename_prefix,
+                format=format, pingpong=pingpong, save_output=save_output,
+                images=images, video=video, audio=audio, custom_path=custom_path,
+                prompt=prompt, extra_pnginfo=extra_pnginfo, unique_id=unique_id, **format_values
+            )
+
+        # 2. 针对 images + video/h264-mp4 执行 Topaz 极速渲染流
+        original_extra = extra_pnginfo or {}
+        target_custom_path = str(custom_path).strip() if (custom_path and str(custom_path).strip()) else None
+        default_out_dir = folder_paths.get_output_directory()
+        has_custom = bool(target_custom_path and os.path.normcase(os.path.abspath(target_custom_path)) != os.path.normcase(os.path.abspath(default_out_dir)))
+
+        # 目录确定
+        internal_dir = folder_paths.get_temp_directory() if has_custom else (default_out_dir if save_output else folder_paths.get_temp_directory())
+        full_output_folder, filename, counter, subfolder, filename_prefix = folder_paths.get_save_image_path(filename_prefix, internal_dir)
+        os.makedirs(full_output_folder, exist_ok=True)
+        out_filename = f"{filename}_{counter:05}.mp4"
+        internal_final_path = os.path.join(full_output_folder, out_filename)
+
+        # 处理 pingpong
+        t = images
+        if pingpong and t.size(0) > 2:
+            import torch
+            t = torch.cat([t, t.flip(dims=[0])[1:-1]], dim=0)
+
+        total_frames, h, w, c = t.shape
+        in_pix = 'rgba' if c == 4 else 'rgb24'
+
+        ff = _ffmpeg_path()
+        crf = format_values.get("crf", 19)
+        pix_fmt = format_values.get("pix_fmt", "yuv420p")
+
+        # 优先使用 GPU h264_nvenc 硬件加速，自动回退 CPU libx264
+        if _supports_nvenc(ff):
+            enc_args = ['-c:v', 'h264_nvenc', '-pix_fmt', pix_fmt,
+                        '-preset', 'p7', '-rc', 'vbr', '-cq', str(crf), '-b:v', '0']
+        else:
+            enc_args = ['-c:v', 'libx264', '-pix_fmt', pix_fmt,
+                        '-crf', str(crf), '-preset', 'medium']
+
+        args = [ff, '-v', 'error', '-f', 'rawvideo', '-pix_fmt', in_pix,
+                '-color_range', 'pc', '-colorspace', 'rgb',
+                '-color_primaries', 'bt709', '-color_trc', 'iec61966-2-1',
+                '-s', f'{w}x{h}', '-r', str(frame_rate), '-i', '-'] \
+            + enc_args \
+            + ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2:out_color_matrix=bt709',
+               '-color_range', 'tv', '-colorspace', 'bt709',
+               '-color_primaries', 'bt709', '-color_trc', 'bt709',
+               '-movflags', '+faststart', '-y', internal_final_path]
+
+        pbar = ProgressBar(total_frames) if ProgressBar is not None else None
+
+        # Topaz 批次 SIMD 快速转换推流（256 帧一组）
+        BATCH = 256
+        import torch
+        with subprocess.Popen(args, stdin=subprocess.PIPE, stderr=subprocess.PIPE) as proc:
+            for start in range(0, total_frames, BATCH):
+                batch = t[start:start + BATCH].detach()
+                if batch.is_cuda:
+                    batch = batch.cpu()
+                # 矢量化快速提升并转 uint8
+                arr = batch.float().clamp_(0.0, 1.0).mul_(255.0).round_().to(torch.uint8).numpy()
+                proc.stdin.write(arr.tobytes())
+                if pbar is not None:
+                    pbar.update(len(batch))
+            proc.stdin.close()
+            err = proc.stderr.read()
+            proc.wait()
+
+        if proc.returncode != 0:
+            if os.path.exists(internal_final_path):
+                try:
+                    os.remove(internal_final_path)
+                except OSError:
+                    pass
+            raise RuntimeError('TrucyVideoCombineFast ffmpeg 失败:\n' + err.decode(errors='replace')[-800:])
+
+        # 合并音频
+        if audio is not None:
+            internal_final_path = self._fast_mux_audio(ff, internal_final_path, audio)
+
+        # 剔除 -audio 后缀
+        internal_final_path = self._clean_audio_suffix(internal_final_path)
+
+        # 嵌入元数据
+        if format_values.get("save_metadata", True):
+            self._embed_metadata(internal_final_path, self._metadata(prompt, original_extra))
+
+        final_return_path = internal_final_path
+
+        # 自定义路径存储
+        if target_custom_path and os.path.isfile(internal_final_path):
+            try:
+                os.makedirs(target_custom_path, exist_ok=True)
+                dest_path = os.path.join(target_custom_path, os.path.basename(internal_final_path))
+                if os.path.normcase(os.path.abspath(internal_final_path)) != os.path.normcase(os.path.abspath(dest_path)):
+                    shutil.copy2(internal_final_path, dest_path)
+                final_return_path = dest_path
+            except Exception as e:
+                print(f"[TrucyVideoCombineFast] 复制到自定义路径异常: {e}")
+
+        # 前端 UI 字典构建
+        ui_info = {
+            "gifs": [{
+                "filename": os.path.basename(internal_final_path),
+                "subfolder": subfolder if not has_custom else "",
+                "type": "temp" if has_custom else ("output" if save_output else "temp"),
+                "format": "video/mp4",
+                "t": uuid.uuid4().hex[:6]
+            }]
+        }
+
+        abs_final_return = os.path.abspath(final_return_path)
+        video_out = VideoFromFile(abs_final_return) if VideoFromFile is not None else abs_final_return
+
+        return {"ui": ui_info, "result": (video_out, abs_final_return)}
+
+
 NODE_CLASS_MAPPINGS = {
-    "TrucyVideoCombine": TrucyVideoCombine
+    "TrucyVideoCombine": TrucyVideoCombine,
+    "TrucyVideoCombineFast": TrucyVideoCombineFast,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyVideoCombine": "Video Combine (Trucy)"
+    "TrucyVideoCombine": "Video Combine (Trucy)",
+    "TrucyVideoCombineFast": "Video Combine Fast (Trucy)",
 }

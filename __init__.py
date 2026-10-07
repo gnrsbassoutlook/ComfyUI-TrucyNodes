@@ -13,7 +13,6 @@ subprocess.Popen.__init__ = _patched_Popen_init
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart, TrucyTextCleaner
 from .excel_nodes import TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10
-from .klein_nodes import TrucyKleinEncode, TrucyKleinEncode6
 from .image_adapter import TrucyImageLoaderIndex, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
 from .trucy_toolkit import TrucyImageLoaderString6, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter6, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
 from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge
@@ -30,7 +29,7 @@ def _safe_import(module_name, class_names):
         return [None] * len(class_names)
 
 TrucyVideoLoaderIndex, TrucyMiniMaxH3Prep, TrucyMiniMaxH3Prompt = _safe_import("trucy_video", ["TrucyVideoLoaderIndex", "TrucyMiniMaxH3Prep", "TrucyMiniMaxH3Prompt"])
-(TrucyVideoCombine,) = _safe_import("trucy_video_combine", ["TrucyVideoCombine"])
+TrucyVideoCombine, TrucyVideoCombineFast = _safe_import("trucy_video_combine", ["TrucyVideoCombine", "TrucyVideoCombineFast"])
 (TrucyDocLoader,) = _safe_import("trucy_doc", ["TrucyDocLoader"])
 
 NODE_CLASS_MAPPINGS = {
@@ -52,8 +51,6 @@ NODE_CLASS_MAPPINGS = {
     "TrucyExcelReader": TrucyExcelReader,
     "TrucyExcelReader6": TrucyExcelReader6,
     "TrucyExcelReader10": TrucyExcelReader10,
-    "TrucyKleinEncode": TrucyKleinEncode,
-    "TrucyKleinEncode6": TrucyKleinEncode6,
     "TrucyImageLoaderIndex": TrucyImageLoaderIndex,
     "TrucyImageAdapter": TrucyImageAdapter,
     "TrucyAssetGrid6": TrucyAssetGrid6,
@@ -80,6 +77,7 @@ optional_nodes = {
     "TrucyMiniMaxH3Prompt": TrucyMiniMaxH3Prompt,
     "TrucyDocLoader": TrucyDocLoader,
     "TrucyVideoCombine": TrucyVideoCombine,
+    "TrucyVideoCombineFast": TrucyVideoCombineFast,
 }
 for name, cls in optional_nodes.items():
     if cls is not None:
@@ -104,8 +102,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyExcelReader": "🚀 Excel-Reader-Trucy",
     "TrucyExcelReader6": "🚀 Excel-Reader-6-Trucy",
     "TrucyExcelReader10": "🚀 Excel-Reader-10-Trucy",
-    "TrucyKleinEncode": "🚀 Klein-Model Text Encode (10ch) (Trucy)",
-    "TrucyKleinEncode6": "🚀 Klein-Model Text Encode (6ch) (Trucy)",
     "TrucyImageLoaderIndex": "🚀 Image Loader by Index (Trucy)",
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
     "TrucyAssetGrid6": "🚀 Trucy Asset Grid (6)",
@@ -124,6 +120,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyMiniMaxH3Prep": "🚀 MiniMax H3 Multi-Ref Data Prep (Trucy)",
     "TrucyMiniMaxH3Prompt": "🚀 MiniMax H3 Prompt & Conditioning (Trucy)",
     "TrucyVideoCombine": "🚀 Video-Combine-Trucy",
+    "TrucyVideoCombineFast": "🚀 Video-Combine-Fast (Trucy)",
     "TrucyDocLoader": "🚀 Doc-Loader-Trucy",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",

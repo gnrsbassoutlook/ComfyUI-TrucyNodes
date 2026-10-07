@@ -3,7 +3,7 @@ import { api } from "../../scripts/api.js";
 import { setWidgetConfig } from "../../extensions/core/widgetInputs.js";
 import { applyTextReplacements } from "../../scripts/utils.js";
 
-const NODE_NAME = "TrucyVideoCombine";
+const TARGET_NODES = ["TrucyVideoCombine", "TrucyVideoCombineFast"];
 
 function chainCallback(object, property, callback) {
     if (!object) return;
@@ -19,16 +19,19 @@ function chainCallback(object, property, callback) {
     }
 }
 
+const COMMON_CONV_LIST = [
+    "frame_rate",
+    "loop_count",
+    "filename_prefix",
+    "format",
+    "pingpong",
+    "save_output",
+    "custom_path",
+];
+
 const convDict = {
-    [NODE_NAME]: [
-        "frame_rate",
-        "loop_count",
-        "filename_prefix",
-        "format",
-        "pingpong",
-        "save_output",
-        "custom_path",
-    ],
+    "TrucyVideoCombine": COMMON_CONV_LIST,
+    "TrucyVideoCombineFast": COMMON_CONV_LIST,
 };
 
 function roundVhsNumber(value, precision) {
@@ -337,9 +340,6 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.style.display = "block";
         previewWidget.videoEl.style.cursor = "pointer";
 
-        // =====================================================================
-        // 【精致胶囊按钮】：默认隐藏不抢占空间，仅在画面展开时位于左下角
-        // =====================================================================
         const playBtn = document.createElement("button");
         playBtn.textContent = "⏸ 暂停";
         playBtn.style.position = "absolute";
@@ -354,7 +354,7 @@ function addVideoPreview(nodeType) {
         playBtn.style.cursor = "pointer";
         playBtn.style.zIndex = "99";
         playBtn.style.opacity = "0";
-        playBtn.style.display = "none"; // 初始彻底隐藏，绝不漂移到标题栏
+        playBtn.style.display = "none";
         playBtn.style.transition = "opacity 0.2s ease";
         playBtn.style.pointerEvents = "auto";
 
@@ -362,7 +362,6 @@ function addVideoPreview(nodeType) {
             if (previewWidget.videoEl.videoWidth && previewWidget.videoEl.videoHeight) {
                 previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
                 fitHeight(previewNode);
-                // 只有视频画面真正准备好后，才允许胶囊按钮出现
                 playBtn.style.display = "block";
             }
         };
@@ -376,7 +375,6 @@ function addVideoPreview(nodeType) {
             fitHeight(previewNode);
         });
 
-        // 鼠标悬停出声 + 浮现胶囊
         previewWidget.parentEl.onmouseenter = () => {
             previewWidget.videoEl.muted = false;
             if (previewWidget.videoEl.src && previewWidget.videoEl.videoWidth > 0) {
@@ -384,8 +382,6 @@ function addVideoPreview(nodeType) {
                 playBtn.style.opacity = "1";
             }
         };
-
-        // 鼠标移出静音 + 胶囊淡出（暂停时保留半透明微显提示）
         previewWidget.parentEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
             if (playBtn.style.display !== "none") {
@@ -393,11 +389,9 @@ function addVideoPreview(nodeType) {
             }
         };
 
-        // 统一的播放/暂停动作
         const togglePlay = (e) => {
             if (e) {
                 e.stopPropagation();
-                e.preventDefault();
             }
             if (previewWidget.videoEl.paused) {
                 previewWidget.videoEl.play().catch(() => {});
@@ -415,8 +409,6 @@ function addVideoPreview(nodeType) {
 
         playBtn.onclick = togglePlay;
         playBtn.onpointerdown = (e) => e.stopPropagation();
-
-        // 视频画面双击或单击也能切换
         previewWidget.videoEl.ondblclick = togglePlay;
         previewWidget.videoEl.onclick = togglePlay;
 
@@ -481,7 +473,6 @@ function addVideoPreview(nodeType) {
 
 function addFormatWidgets(nodeType) {
     chainCallback(nodeType.prototype, "onNodeCreated", function () {
-        // 保底补回 frame_rate 控件（如果丢失）
         let frWidget = this.widgets?.find(w => w.name === "frame_rate");
         if (!frWidget) {
             const nodeTypeInfo = LiteGraph.getNodeType(this.type) || LiteGraph.registered_node_types?.[this.type];
@@ -606,7 +597,7 @@ app.registerExtension({
     },
 
     beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData?.name !== NODE_NAME) {
+        if (!TARGET_NODES.includes(nodeData?.name)) {
             return;
         }
 
