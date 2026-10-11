@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import shutil
@@ -340,13 +341,19 @@ class TrucySymbolSniffer:
         return (final_val, str(final_val), text_str)
 
 # ======================================================================
-# 4. 纯文字智能转换器
+# 4. 纯文字智能转换器 (支持四舍五入 / 全舍 / 全入)
 # ======================================================================
 class TrucyTextToNumber:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"text": ("STRING", {"default": "", "multiline": True})}
+            "required": {
+                "text": ("STRING", {"default": "", "multiline": True}),
+                "round_mode": (
+                    ["Round (四舍五入)", "Floor (全舍)", "Ceil (全入)"],
+                    {"default": "Round (四舍五入)"}
+                ),
+            }
         }
     RETURN_TYPES = ("STRING", "INT", "FLOAT", "BOOLEAN")
     RETURN_NAMES = ("string", "int", "float", "boolean")
@@ -354,11 +361,27 @@ class TrucyTextToNumber:
     CATEGORY = "TrucyNodes/Text"
     OUTPUT_NODE = True  # 允许直接执行并将结果回传前端
 
-    def convert(self, text):
-        res_i, res_f = extract_numbers(text)
+    def convert(self, text, round_mode="Round (四舍五入)"):
+        _, res_f = extract_numbers(text)
+
+        # 根据选择的模式处理整数输出
+        if round_mode.startswith("Round"):
+            # 数学标准四舍五入（支持正数与负数）
+            res_i = int(math.floor(res_f + 0.5)) if res_f >= 0 else int(math.ceil(res_f - 0.5))
+        elif round_mode.startswith("Floor"):
+            # 全舍（向下取整）
+            res_i = int(math.floor(res_f))
+        elif round_mode.startswith("Ceil"):
+            # 全入（向上取整）
+            res_i = int(math.ceil(res_f))
+        else:
+            res_i = int(res_f)
+
         clean_text = text.strip().lower()
-        if clean_text in ["0", "0.0", "", "none", "null", "false"]: res_b = False
-        else: res_b = True
+        if clean_text in ["0", "0.0", "", "none", "null", "false"]: 
+            res_b = False
+        else: 
+            res_b = True
         
         # 格式化呈现：短内容优先排在同一行，超出宽度前端会自动换行到第2行
         display_txt = f"str = {text}, int = {res_i}, float = {res_f}"
