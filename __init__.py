@@ -29,7 +29,7 @@ def _safe_import(module_name, class_names):
         return [None] * len(class_names)
 
 TrucyVideoLoaderIndex, TrucyMiniMaxH3Prep, TrucyMiniMaxH3Prompt = _safe_import("trucy_video", ["TrucyVideoLoaderIndex", "TrucyMiniMaxH3Prep", "TrucyMiniMaxH3Prompt"])
-TrucyVideoCombine, TrucyVideoCombineFast = _safe_import("trucy_video_combine", ["TrucyVideoCombine", "TrucyVideoCombineFast"])
+(TrucyVideoCombine,) = _safe_import("trucy_video_combine", ["TrucyVideoCombine"])
 (TrucyDocLoader,) = _safe_import("trucy_doc", ["TrucyDocLoader"])
 
 NODE_CLASS_MAPPINGS = {
@@ -77,7 +77,6 @@ optional_nodes = {
     "TrucyMiniMaxH3Prompt": TrucyMiniMaxH3Prompt,
     "TrucyDocLoader": TrucyDocLoader,
     "TrucyVideoCombine": TrucyVideoCombine,
-    "TrucyVideoCombineFast": TrucyVideoCombineFast,
 }
 for name, cls in optional_nodes.items():
     if cls is not None:
@@ -120,7 +119,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyMiniMaxH3Prep": "🚀 MiniMax H3 Multi-Ref Data Prep (Trucy)",
     "TrucyMiniMaxH3Prompt": "🚀 MiniMax H3 Prompt & Conditioning (Trucy)",
     "TrucyVideoCombine": "🚀 Video-Combine-Trucy",
-    "TrucyVideoCombineFast": "🚀 Video-Combine-Fast (Trucy)",
     "TrucyDocLoader": "🚀 Doc-Loader-Trucy",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",

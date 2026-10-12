@@ -3,7 +3,7 @@ import { api } from "../../scripts/api.js";
 import { setWidgetConfig } from "../../extensions/core/widgetInputs.js";
 import { applyTextReplacements } from "../../scripts/utils.js";
 
-const TARGET_NODES = ["TrucyVideoCombine", "TrucyVideoCombineFast"];
+const TARGET_NODES = ["TrucyVideoCombine"];
 
 function chainCallback(object, property, callback) {
     if (!object) return;
@@ -31,7 +31,6 @@ const COMMON_CONV_LIST = [
 
 const convDict = {
     "TrucyVideoCombine": COMMON_CONV_LIST,
-    "TrucyVideoCombineFast": COMMON_CONV_LIST,
 };
 
 function roundVhsNumber(value, precision) {
@@ -324,7 +323,7 @@ function addVideoPreview(nodeType) {
         };
 
         element.style.width = "100%";
-        previewWidget.value = { hidden: false, paused: false, params: {}, muted: true };
+        previewWidget.value = { hidden: false, paused: false, loop: true, params: {}, muted: true };
         
         previewWidget.parentEl = document.createElement("div");
         previewWidget.parentEl.className = "vhs_preview";
@@ -340,6 +339,7 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.style.display = "block";
         previewWidget.videoEl.style.cursor = "pointer";
 
+        // 1. 播放/暂停按钮
         const playBtn = document.createElement("button");
         playBtn.textContent = "⏸ 暂停";
         playBtn.style.position = "absolute";
@@ -358,11 +358,31 @@ function addVideoPreview(nodeType) {
         playBtn.style.transition = "opacity 0.2s ease";
         playBtn.style.pointerEvents = "auto";
 
+        // 2. 循环/单次按钮
+        const loopBtn = document.createElement("button");
+        loopBtn.textContent = "🔁 循环";
+        loopBtn.style.position = "absolute";
+        loopBtn.style.bottom = "8px";
+        loopBtn.style.left = "74px";
+        loopBtn.style.padding = "3px 8px";
+        loopBtn.style.fontSize = "11px";
+        loopBtn.style.color = "#ffffff";
+        loopBtn.style.backgroundColor = "rgba(0, 120, 255, 0.75)";
+        loopBtn.style.border = "1px solid rgba(255, 255, 255, 0.35)";
+        loopBtn.style.borderRadius = "10px";
+        loopBtn.style.cursor = "pointer";
+        loopBtn.style.zIndex = "99";
+        loopBtn.style.opacity = "0";
+        loopBtn.style.display = "none";
+        loopBtn.style.transition = "opacity 0.2s ease";
+        loopBtn.style.pointerEvents = "auto";
+
         const onMetadataLoaded = () => {
             if (previewWidget.videoEl.videoWidth && previewWidget.videoEl.videoHeight) {
                 previewWidget.aspectRatio = previewWidget.videoEl.videoWidth / previewWidget.videoEl.videoHeight;
                 fitHeight(previewNode);
                 playBtn.style.display = "block";
+                loopBtn.style.display = "block";
             }
         };
 
@@ -372,7 +392,18 @@ function addVideoPreview(nodeType) {
         previewWidget.videoEl.addEventListener("error", () => {
             previewWidget.parentEl.hidden = true;
             playBtn.style.display = "none";
+            loopBtn.style.display = "none";
             fitHeight(previewNode);
+        });
+
+        // 单次播放结束事件响应
+        previewWidget.videoEl.addEventListener("ended", () => {
+            if (!previewWidget.videoEl.loop) {
+                previewWidget.value.paused = true;
+                playBtn.textContent = "▶ 播放";
+                playBtn.style.backgroundColor = "rgba(0, 120, 255, 0.75)";
+                playBtn.style.opacity = "1";
+            }
         });
 
         previewWidget.parentEl.onmouseenter = () => {
@@ -380,19 +411,20 @@ function addVideoPreview(nodeType) {
             if (previewWidget.videoEl.src && previewWidget.videoEl.videoWidth > 0) {
                 playBtn.style.display = "block";
                 playBtn.style.opacity = "1";
+                loopBtn.style.display = "block";
+                loopBtn.style.opacity = "1";
             }
         };
         previewWidget.parentEl.onmouseleave = () => {
             previewWidget.videoEl.muted = true;
             if (playBtn.style.display !== "none") {
                 playBtn.style.opacity = previewWidget.videoEl.paused ? "0.8" : "0";
+                loopBtn.style.opacity = "0";
             }
         };
 
         const togglePlay = (e) => {
-            if (e) {
-                e.stopPropagation();
-            }
+            if (e) e.stopPropagation();
             if (previewWidget.videoEl.paused) {
                 previewWidget.videoEl.play().catch(() => {});
                 previewWidget.value.paused = false;
@@ -407,13 +439,31 @@ function addVideoPreview(nodeType) {
             }
         };
 
+        const toggleLoop = (e) => {
+            if (e) e.stopPropagation();
+            const isLoop = !previewWidget.videoEl.loop;
+            previewWidget.videoEl.loop = isLoop;
+            previewWidget.value.loop = isLoop;
+            if (isLoop) {
+                loopBtn.textContent = "🔁 循环";
+                loopBtn.style.backgroundColor = "rgba(0, 120, 255, 0.75)";
+            } else {
+                loopBtn.textContent = "➡️ 单次";
+                loopBtn.style.backgroundColor = "rgba(0, 0, 0, 0.65)";
+            }
+        };
+
         playBtn.onclick = togglePlay;
         playBtn.onpointerdown = (e) => e.stopPropagation();
+        loopBtn.onclick = toggleLoop;
+        loopBtn.onpointerdown = (e) => e.stopPropagation();
+
         previewWidget.videoEl.ondblclick = togglePlay;
         previewWidget.videoEl.onclick = togglePlay;
 
         previewWidget.parentEl.appendChild(previewWidget.videoEl);
         previewWidget.parentEl.appendChild(playBtn);
+        previewWidget.parentEl.appendChild(loopBtn);
 
         let timeout = null;
         previewNode.updateParameters = (params, forceUpdate) => {
