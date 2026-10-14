@@ -15,7 +15,7 @@ from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbol
 from .excel_nodes import TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10
 from .image_adapter import TrucyImageLoaderIndex, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
 from .trucy_toolkit import TrucyImageLoaderString6, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter6, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
-from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge
+from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge, TrucyFrameSecondsConverter
 from .trucy_loop import TrucyForLoopStart9ch, TrucyForLoopEnd9ch, TrucyForLoopStart2ch, TrucyForLoopEnd2ch
 from .trucy_remote import TrucyRemoteToggle6x6, TrucyMasterIntRouter
 
@@ -46,6 +46,7 @@ NODE_CLASS_MAPPINGS = {
     "TrucyAnySwitch6": TrucyAnySwitch6,
     "TrucyAnySwitch10": TrucyAnySwitch10,
     "TrucyControlBridge": TrucyControlBridge,
+    "TrucyFrameSecondsConverter": TrucyFrameSecondsConverter,
     "TrucyRemoteToggle6x6": TrucyRemoteToggle6x6,
     "TrucyMasterIntRouter": TrucyMasterIntRouter,
     "TrucyExcelReader": TrucyExcelReader,
@@ -96,6 +97,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyAnySwitch6": "🚀 Any Switch (6ch) (Trucy)",
     "TrucyAnySwitch10": "🚀 Any Switch (10ch) (Trucy)",
     "TrucyControlBridge": "🚀 Control Bridge (Trucy)",
+    "TrucyFrameSecondsConverter": "🚀 Frame & Seconds Converter (Trucy)",
     "TrucyRemoteToggle6x6": "🚀 Remote Toggle 6x6 (Trucy)",
     "TrucyMasterIntRouter": "🚀 5-way Mute/Bypass Nodes-Remote (Trucy)",
     "TrucyExcelReader": "🚀 Excel-Reader-Trucy",
