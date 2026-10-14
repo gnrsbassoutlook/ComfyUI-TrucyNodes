@@ -130,11 +130,8 @@ class TrucyFrameSecondsConverter:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                # 纯整数下拉菜单：只能点选固定帧率，无法随意手填文本
-                "fps_select": (
-                    [8, 12, 16, 24, 25, 30, 48, 50, 60],
-                    {"default": 24}
-                ),
+                # 原生标准 INT 数字输入框，默认 24，可自由敲入，也可右键转为 input 接线
+                "fps": ("INT", {"default": 24, "min": 1, "max": 240, "step": 1}),
                 # 取整模式
                 "round_mode": (
                     ["Round (四舍五入)", "Floor (全舍)", "Ceil (全入)"],
@@ -142,8 +139,6 @@ class TrucyFrameSecondsConverter:
                 ),
             },
             "optional": {
-                # 专属 INT 连线槽：支持直接拉 INT 线连入！接入时优先于下拉菜单
-                "fps_opt": ("INT", {"forceInput": True}),
                 "frames": ("INT", {"forceInput": True}),
                 "seconds": ("FLOAT", {"forceInput": True}),
             }
@@ -154,14 +149,12 @@ class TrucyFrameSecondsConverter:
     FUNCTION = "convert"
     CATEGORY = "TrucyNodes/Logic"
 
-    def convert(self, fps_select, round_mode="Round (四舍五入)", fps_opt=None, frames=None, seconds=None):
+    def convert(self, fps, round_mode="Round (四舍五入)", frames=None, seconds=None):
         # 兼容 ExecutionBlocker 空置
         if frames is not None and type(frames).__name__ == "ExecutionBlocker":
             frames = None
         if seconds is not None and type(seconds).__name__ == "ExecutionBlocker":
             seconds = None
-        if fps_opt is not None and type(fps_opt).__name__ == "ExecutionBlocker":
-            fps_opt = None
 
         # 严格检查：frames 与 seconds 必须且只能接入一个输入
         if frames is not None and seconds is not None:
@@ -169,10 +162,9 @@ class TrucyFrameSecondsConverter:
         if frames is None and seconds is None:
             raise ValueError("❌ [TrucyNodes] 未检测到输入！请接入【帧数 (frames)】或【秒数 (seconds)】其中之一。")
 
-        # 确定最终帧率：若接入了外部 INT 连线则使用连线值，否则使用下拉框纯整型值
-        final_fps = float(fps_opt) if fps_opt is not None else float(fps_select)
-        if final_fps <= 0:
-            final_fps = 24.0
+        fps_val = float(fps)
+        if fps_val <= 0:
+            fps_val = 24.0
 
         # 取整逻辑处理
         def _apply_rounding(val_float):
@@ -187,13 +179,13 @@ class TrucyFrameSecondsConverter:
         # 情况 1：接入了帧数 -> 直出帧数，换算秒数
         if frames is not None:
             out_frames = _apply_rounding(float(frames))
-            out_seconds = round(float(out_frames) / final_fps, 4)
+            out_seconds = round(float(out_frames) / fps_val, 4)
             return (out_frames, out_seconds)
 
         # 情况 2：接入了秒数 -> 直出秒数，按所选模式换算帧数
         else:
             out_seconds = float(seconds)
-            out_frames = _apply_rounding(out_seconds * final_fps)
+            out_frames = _apply_rounding(out_seconds * fps_val)
             return (out_frames, out_seconds)
 
 NODE_CLASS_MAPPINGS = {
