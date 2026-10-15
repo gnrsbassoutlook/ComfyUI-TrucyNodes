@@ -23,7 +23,12 @@ def extract_numbers(text):
     return 0, 0.0
 
 def create_placeholder(style):
-    return torch.ones((1, 512, 512, 3)) if style == "White" else torch.zeros((1, 512, 512, 3))
+    if style == "White":
+        return torch.ones((1, 512, 512, 3), dtype=torch.float32)
+    elif style == "Black":
+        return torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+    # 选 None 时返回真正的 None
+    return None
 
 def create_error_image(txt):
     img = Image.new('RGB', (512, 512), (128, 128, 128))
@@ -121,7 +126,10 @@ class TrucyImageLoaderString6(BaseTrucyLoaderDirect):
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {"folder_path": ("STRING", {"default": "C:/Images"}), "empty_style": (["White", "Black"],)},
+            "required": {
+                "folder_path": ("STRING", {"default": "C:/Images"}), 
+                "empty_style": (["None", "Black", "White"], {"default": "None"}),
+            },
             "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 7)}
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*6, tuple(f"Img_{i}" for i in range(1, 7)), "run", "TrucyNodes/Toolkit"
@@ -131,7 +139,10 @@ class TrucyImageLoaderString10(BaseTrucyLoaderDirect):
     @classmethod
     def INPUT_TYPES(s):
         return {
-            "required": {"folder_path": ("STRING", {"default": "C:/Images"}), "empty_style": (["White", "Black"],)},
+            "required": {
+                "folder_path": ("STRING", {"default": "C:/Images"}), 
+                "empty_style": (["None", "Black", "White"], {"default": "None"}),
+            },
             "optional": {f"img_txt_{i}": ("STRING", {"forceInput": True, "default": "0"}) for i in range(1, 11)}
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE",)*10, tuple(f"Img_{i}" for i in range(1, 11)), "run", "TrucyNodes/Toolkit"
@@ -195,7 +206,6 @@ class TrucyPromptSplitter10(BaseTrucySplitter):
     FUNCTION, CATEGORY = "run", "TrucyNodes/Toolkit"
     def run(self, **kwargs): return self.split_logic(count=10, **kwargs)
 
-
 # ========================================================
 # 3. ID 提取器 (支持 2位 到 5位 智能识别)
 # ========================================================
@@ -241,7 +251,6 @@ class TrucyIDExtractor:
             return (ext_id, rem, f"{ext_id} {rem}" if rem else ext_id)
         return ("0", "", "0")
 
-
 # ========================================================
 # 4. 文本切割器 (TrucyStringSlicer)
 # ========================================================
@@ -269,7 +278,6 @@ class TrucyStringSlicer:
         if include_delimiters: return text_input[start:end+len(right_delimiter)], text_input[:start], text_input[end+len(right_delimiter):], text_input[:start]+text_input[end+len(right_delimiter):]
         return text_input[pos:end], text_input[:start], text_input[end+len(right_delimiter):], text_input[:start]+text_input[end+len(right_delimiter):]
 
-
 # ========================================================
 # 5. 文件夹遍历器 (TrucyFolderIterator)
 # ========================================================
@@ -283,7 +291,7 @@ class TrucyFolderIterator:
                 "filter_mode": (["Contains", "Not Contains"],),
                 "filter_text": ("STRING", {"default": ""}),
                 "extension": (["All", "png", "jpg", "jpeg", "webp", "bmp"],),
-                "empty_style": (["White", "Black"],),
+                "empty_style": (["None", "Black", "White"], {"default": "Black"}),
             }
         }
     RETURN_TYPES, RETURN_NAMES, FUNCTION, CATEGORY = ("IMAGE", "STRING", "INT"), ("Image", "Filename", "Count"), "load", "TrucyNodes/Toolkit"
@@ -296,7 +304,6 @@ class TrucyFolderIterator:
         target = valid[image_index % len(valid)]
         img = load_image_file(os.path.join(folder_path, target))
         return img if img is not None else create_error_image(target), target, len(valid)
-
 
 # ========================================================
 # 6. 训练数据集保存器 (TrucyDatasetSaver)
@@ -321,7 +328,7 @@ class TrucyDatasetSaver:
         return {"ui": {"images": []}}
 
 # ========================================================
-# 注册映射 (全部纯净为 6)
+# 注册映射
 # ========================================================
 NODE_CLASS_MAPPINGS = {
     "TrucyImageLoaderString6": TrucyImageLoaderString6,

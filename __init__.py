@@ -13,7 +13,7 @@ subprocess.Popen.__init__ = _patched_Popen_init
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart, TrucyTextCleaner
 from .excel_nodes import TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10
-from .image_adapter import TrucyImageLoaderIndex, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
+from .image_adapter import TrucyImageLoaderIndex, TrucyImageLoader6, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
 from .trucy_toolkit import TrucyImageLoaderString6, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter6, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
 from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge, TrucyFrameSecondsConverter
 from .trucy_loop import TrucyForLoopStart9ch, TrucyForLoopEnd9ch, TrucyForLoopStart2ch, TrucyForLoopEnd2ch
@@ -53,6 +53,7 @@ NODE_CLASS_MAPPINGS = {
     "TrucyExcelReader6": TrucyExcelReader6,
     "TrucyExcelReader10": TrucyExcelReader10,
     "TrucyImageLoaderIndex": TrucyImageLoaderIndex,
+    "TrucyImageLoader6": TrucyImageLoader6,
     "TrucyImageAdapter": TrucyImageAdapter,
     "TrucyAssetGrid6": TrucyAssetGrid6,
     "TrucyAssetGrid10": TrucyAssetGrid10,
@@ -104,6 +105,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyExcelReader6": "🚀 Excel-Reader-6-Trucy",
     "TrucyExcelReader10": "🚀 Excel-Reader-10-Trucy",
     "TrucyImageLoaderIndex": "🚀 Image Loader by Index (Trucy)",
+    "TrucyImageLoader6": "🚀 Image Loader (6 Channels) (Trucy)",
     "TrucyImageAdapter": "🚀 Image Size Adapter (Trucy)",
     "TrucyAssetGrid6": "🚀 Trucy Asset Grid (6)",
     "TrucyAssetGrid10": "🚀 Trucy Asset Grid (10)",

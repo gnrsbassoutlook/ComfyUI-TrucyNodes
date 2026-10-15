@@ -194,14 +194,14 @@ class _TrucyExcelBase:
 
             results = []
             for _ in positions:
-                results.extend((error, 0, 0.0))
+                results.extend((error_message, 0, 0.0))
             return tuple(results)
 
         except Exception as error:
             error_message = f"Error: {error}"
             results = []
             for _ in positions:
-                results.extend((error, 0, 0.0))
+                results.extend((error_message, 0, 0.0))
             return tuple(results)
 
 
@@ -357,11 +357,19 @@ class _TrucyExcelMultiReader(_TrucyExcelBase):
 
             positions.append((row, column))
 
-        return self.read_multiple_cells(
+        # 读取交错结果: (Text_1, Int_1, Float_1, Text_2, Int_2, Float_2, ...)
+        raw_results = self.read_multiple_cells(
             excel_path=excel_path,
             sheet_name=sheet_name,
             positions=positions,
         )
+
+        # 按照类型分类聚合: 先全部 Text，再全部 Int，最后全部 Float
+        texts = raw_results[0::3]
+        ints = raw_results[1::3]
+        floats = raw_results[2::3]
+
+        return tuple(texts + ints + floats)
 
 
 # ========================================================
@@ -370,55 +378,43 @@ class _TrucyExcelMultiReader(_TrucyExcelBase):
 class TrucyExcelReader6(_TrucyExcelMultiReader):
     CHANNELS = 6
 
+    # 先 6 个 STRING，再 6 个 INT，最后 6 个 FLOAT
     RETURN_TYPES = (
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
+        "STRING", "STRING", "STRING", "STRING", "STRING", "STRING",
+        "INT", "INT", "INT", "INT", "INT", "INT",
+        "FLOAT", "FLOAT", "FLOAT", "FLOAT", "FLOAT", "FLOAT",
     )
 
     RETURN_NAMES = (
-        "string_1", "int_1", "float_1",
-        "string_2", "int_2", "float_2",
-        "string_3", "int_3", "float_3",
-        "string_4", "int_4", "float_4",
-        "string_5", "int_5", "float_5",
-        "string_6", "int_6", "float_6",
+        "Text_1", "Text_2", "Text_3", "Text_4", "Text_5", "Text_6",
+        "Int_1", "Int_2", "Int_3", "Int_4", "Int_5", "Int_6",
+        "Float_1", "Float_2", "Float_3", "Float_4", "Float_5", "Float_6",
     )
 
 
 # ========================================================
-# 10 路版本
+# 10 路版本 (TrucyExcelReader10)
 # ========================================================
 class TrucyExcelReader10(_TrucyExcelMultiReader):
     CHANNELS = 10
 
+    # 先 10 个 STRING，再 10 个 INT，最后 10 个 FLOAT
     RETURN_TYPES = (
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
-        "STRING", "INT", "FLOAT",
+        "STRING", "STRING", "STRING", "STRING", "STRING",
+        "STRING", "STRING", "STRING", "STRING", "STRING",
+        "INT", "INT", "INT", "INT", "INT",
+        "INT", "INT", "INT", "INT", "INT",
+        "FLOAT", "FLOAT", "FLOAT", "FLOAT", "FLOAT",
+        "FLOAT", "FLOAT", "FLOAT", "FLOAT", "FLOAT",
     )
 
     RETURN_NAMES = (
-        "string_1", "int_1", "float_1",
-        "string_2", "int_2", "float_2",
-        "string_3", "int_3", "float_3",
-        "string_4", "int_4", "float_4",
-        "string_5", "int_5", "float_5",
-        "string_6", "int_6", "float_6",
-        "string_7", "int_7", "float_7",
-        "string_8", "int_8", "float_8",
-        "string_9", "int_9", "float_9",
-        "string_10", "int_10", "float_10",
+        "Text_1", "Text_2", "Text_3", "Text_4", "Text_5",
+        "Text_6", "Text_7", "Text_8", "Text_9", "Text_10",
+        "Int_1", "Int_2", "Int_3", "Int_4", "Int_5",
+        "Int_6", "Int_7", "Int_8", "Int_9", "Int_10",
+        "Float_1", "Float_2", "Float_3", "Float_4", "Float_5",
+        "Float_6", "Float_7", "Float_8", "Float_9", "Float_10",
     )
 
 
