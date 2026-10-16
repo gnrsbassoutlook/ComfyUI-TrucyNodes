@@ -1,0 +1,12 @@
+# Python 字节码缓存（编译产物，机器相关，勿入库）
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 本地预设地址簿（含明文 API Key，仅本地使用，严禁入库）
+api_presets.json
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini

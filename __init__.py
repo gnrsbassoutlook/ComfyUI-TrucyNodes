@@ -10,12 +10,13 @@ def _patched_Popen_init(self, *args, **kwargs):
 subprocess.Popen.__init__ = _patched_Popen_init
 
 # 模块导入
+# 注意：只依赖 ComfyUI 环境自带库（torch/PIL/numpy/comfy）的模块走硬导入；
+#       依赖第三方库的模块（excel_nodes→openpyxl、trucy_switch→Impact Pack）
+#       统一走下方 _safe_import——缺依赖时仅跳过对应节点，不影响其余节点注册
 from .audio_nodes import TrucyAudioLoaderIndex, AudioLengthDetector, EmptyAudioGenerator, TrucySaveAudio
 from .text_nodes import TrucyTxtBatchLoader, TrucyTxtPreviewAndSave, TrucySymbolSniffer, TrucyTextToNumber, TrucyTextSlicerSmart, TrucyTextCleaner
-from .excel_nodes import TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10
 from .image_adapter import TrucyImageLoaderIndex, TrucyImageLoader6, TrucyImageAdapter, TrucyAssetGrid6, TrucyAssetGrid10, TrucyImageBridge6, TrucyImageBridge10
 from .trucy_toolkit import TrucyImageLoaderString6, TrucyImageLoaderString10, TrucyFolderIterator, TrucyPromptSplitter6, TrucyPromptSplitter10, TrucyIDExtractor, TrucyStringSlicer, TrucyDatasetSaver
-from .trucy_switch import TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge, TrucyFrameSecondsConverter
 from .trucy_loop import TrucyForLoopStart9ch, TrucyForLoopEnd9ch, TrucyForLoopStart2ch, TrucyForLoopEnd2ch
 from .trucy_remote import TrucyRemoteToggle6x6, TrucyMasterIntRouter
 
@@ -28,9 +29,33 @@ def _safe_import(module_name, class_names):
         print(f"[TrucyNodes] ❌ 导入 {module_name} 失败: {e}")
         return [None] * len(class_names)
 
-TrucyVideoLoaderIndex, TrucyMiniMaxH3Prep, TrucyMiniMaxH3Prompt = _safe_import("trucy_video", ["TrucyVideoLoaderIndex", "TrucyMiniMaxH3Prep", "TrucyMiniMaxH3Prompt"])
+(TrucyVideoLoaderIndex,) = _safe_import("trucy_video", ["TrucyVideoLoaderIndex"])
 (TrucyVideoCombine,) = _safe_import("trucy_video_combine", ["TrucyVideoCombine"])
 (TrucyDocLoader,) = _safe_import("trucy_doc", ["TrucyDocLoader"])
+
+# 第三方依赖模块（容错导入）：
+#   excel_nodes —— 需要 openpyxl（pip install openpyxl，已列入 requirements.txt）
+#   trucy_switch —— 需要 ComfyUI-Impact-Pack 插件（ComfyUI Manager 搜 Impact 安装）
+# 未装对应依赖时仅跳过这些节点，日志会打印缺什么，其余节点不受影响
+(TrucyExcelReader, TrucyExcelReader6, TrucyExcelReader10) = _safe_import(
+    "excel_nodes", ["TrucyExcelReader", "TrucyExcelReader6", "TrucyExcelReader10"],
+)
+(TrucyAnySwitch6, TrucyAnySwitch10, TrucyControlBridge, TrucyFrameSecondsConverter) = _safe_import(
+    "trucy_switch",
+    ["TrucyAnySwitch6", "TrucyAnySwitch10", "TrucyControlBridge", "TrucyFrameSecondsConverter"],
+)
+
+# LLM / ref2v 节点族（合并自 ComfyUI-TrucyLLM，2026-10-16）
+#   trucy_skill_runner.py —— Skill Runner Trucy：LLM / Skill Loader / Chat / Prompt / Unload
+#   trucy_ref2v.py        —— ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
+(TrucyLLM, TrucySkillLoader, TrucyChat, TrucyPromptH3QWI, TrucyUnloadModel) = _safe_import(
+    "trucy_skill_runner",
+    ["TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
+)
+(TrucyH3RefEncode, TrucyH3PromptEncode, TrucyH3RefToVideo) = _safe_import(
+    "trucy_ref2v",
+    ["TrucyH3RefEncode", "TrucyH3PromptEncode", "TrucyH3RefToVideo"],
+)
 
 NODE_CLASS_MAPPINGS = {
     "TrucyAudioLoaderIndex": TrucyAudioLoaderIndex,
@@ -43,15 +68,8 @@ NODE_CLASS_MAPPINGS = {
     "TrucyTextToNumber": TrucyTextToNumber,
     "TrucyTextSlicerSmart": TrucyTextSlicerSmart,
     "TrucyTextCleaner": TrucyTextCleaner,
-    "TrucyAnySwitch6": TrucyAnySwitch6,
-    "TrucyAnySwitch10": TrucyAnySwitch10,
-    "TrucyControlBridge": TrucyControlBridge,
-    "TrucyFrameSecondsConverter": TrucyFrameSecondsConverter,
     "TrucyRemoteToggle6x6": TrucyRemoteToggle6x6,
     "TrucyMasterIntRouter": TrucyMasterIntRouter,
-    "TrucyExcelReader": TrucyExcelReader,
-    "TrucyExcelReader6": TrucyExcelReader6,
-    "TrucyExcelReader10": TrucyExcelReader10,
     "TrucyImageLoaderIndex": TrucyImageLoaderIndex,
     "TrucyImageLoader6": TrucyImageLoader6,
     "TrucyImageAdapter": TrucyImageAdapter,
@@ -75,10 +93,27 @@ NODE_CLASS_MAPPINGS = {
 
 optional_nodes = {
     "TrucyVideoLoaderIndex": TrucyVideoLoaderIndex,
-    "TrucyMiniMaxH3Prep": TrucyMiniMaxH3Prep,
-    "TrucyMiniMaxH3Prompt": TrucyMiniMaxH3Prompt,
     "TrucyDocLoader": TrucyDocLoader,
     "TrucyVideoCombine": TrucyVideoCombine,
+    # 依赖 openpyxl（requirements.txt 已列）
+    "TrucyExcelReader": TrucyExcelReader,
+    "TrucyExcelReader6": TrucyExcelReader6,
+    "TrucyExcelReader10": TrucyExcelReader10,
+    # 依赖 ComfyUI-Impact-Pack 插件
+    "TrucyAnySwitch6": TrucyAnySwitch6,
+    "TrucyAnySwitch10": TrucyAnySwitch10,
+    "TrucyControlBridge": TrucyControlBridge,
+    "TrucyFrameSecondsConverter": TrucyFrameSecondsConverter,
+    # Skill Runner Trucy 节点族
+    "TrucyLLM": TrucyLLM,
+    "TrucySkillLoader": TrucySkillLoader,
+    "TrucyChat": TrucyChat,
+    "TrucyPromptH3QWI": TrucyPromptH3QWI,
+    "TrucyUnloadModel": TrucyUnloadModel,
+    # ref2v Trucy 节点族
+    "TrucyH3RefEncode": TrucyH3RefEncode,
+    "TrucyH3PromptEncode": TrucyH3PromptEncode,
+    "TrucyH3RefToVideo": TrucyH3RefToVideo,
 }
 for name, cls in optional_nodes.items():
     if cls is not None:
@@ -120,15 +155,73 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyStringSlicer": "🚀 Trucy String Slicer",
     "TrucyDatasetSaver": "🚀 Trucy Dataset Saver",
     "TrucyVideoLoaderIndex": "🚀 Video Loader by Index (Trucy)",
-    "TrucyMiniMaxH3Prep": "🚀 MiniMax H3 Multi-Ref Data Prep (Trucy)",
-    "TrucyMiniMaxH3Prompt": "🚀 MiniMax H3 Prompt & Conditioning (Trucy)",
     "TrucyVideoCombine": "🚀 Video-Combine-Trucy",
     "TrucyDocLoader": "🚀 Doc-Loader-Trucy",
     "TrucyForLoopStart9ch": "🚀 Trucy For Loop Start (9ch)",
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
     "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",
     "TrucyForLoopEnd2ch": "🚀 Trucy For Loop End (2ch)",
+    # Skill Runner Trucy 节点族（LLM + Skill 执行）
+    "TrucyLLM": "🚀 Skill Runner Trucy · LLM",
+    "TrucySkillLoader": "🚀 Skill Runner Trucy · Skill Loader",
+    "TrucyChat": "🚀 Skill Runner Trucy · Chat",
+    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
+    "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
+    # ref2v Trucy 节点族（H3 Ref2VA 编码/缓存）
+    "TrucyH3RefEncode": "🚀 ref2v Trucy · 参考编码（缓存层）",
+    "TrucyH3PromptEncode": "🚀 ref2v Trucy · 提示词编码（出口）",
+    "TrucyH3RefToVideo": "🚀 ref2v Trucy · 参考转视频（合并版）",
 }
 
 WEB_DIRECTORY = "./web"
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
+
+# ---------------------------------------------------------------------------
+# API 预设地址簿 HTTP 接口（供前端「＋ 保存为API预设」按钮增删查；
+# 从 ComfyUI-TrucyLLM 迁入，路由路径保持不变，前端 JS 无需改动）
+# ---------------------------------------------------------------------------
+try:
+    from aiohttp import web
+    from server import PromptServer
+
+    from .trucy_presets import 保存预设, 删除预设, 读取预设
+
+    @PromptServer.instance.routes.get("/trucyllm/api_presets")
+    async def _trucy_presets_get(request):
+        return web.json_response({"presets": 读取预设()})
+
+    @PromptServer.instance.routes.post("/trucyllm/api_presets")
+    async def _trucy_presets_post(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+        try:
+            record = 保存预设(
+                body.get("name"), body.get("api_base"),
+                body.get("api_key"), body.get("model"), body.get("timeout"),
+            )
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        return web.json_response({"ok": True, "preset": record, "presets": 读取预设()})
+
+    @PromptServer.instance.routes.post("/trucyllm/api_presets/delete")
+    async def _trucy_presets_delete(request):
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "请求体不是合法 JSON"}, status=400)
+        删除预设(body.get("name"))
+        return web.json_response({"ok": True, "presets": 读取预设()})
+
+    print("\033[36m[TrucyNodes]\033[0m API预设地址簿接口已注册（/trucyllm/api_presets）")
+except Exception as _e:  # 非 ComfyUI 环境（单测直 import）时静默跳过，节点内路径仍可用
+    print(f"\033[33m[TrucyNodes]\033[0m API预设接口未注册（{_e}），节点内「保存为预设」路径仍可用")
+
+_LLM节点数 = sum(1 for k in NODE_CLASS_MAPPINGS
+                 if k in ("TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI",
+                          "TrucyUnloadModel", "TrucyH3RefEncode", "TrucyH3PromptEncode",
+                          "TrucyH3RefToVideo"))
+print("\033[36m[TrucyNodes]\033[0m "
+      f"{len(NODE_CLASS_MAPPINGS)} nodes | Skill Runner Trucy + ref2v Trucy 已合并入本包"
+      f"（LLM 节点 {_LLM节点数}/8；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")

@@ -1,0 +1,26 @@
+# ComfyUI-TrucyNodes 依赖
+# ComfyUI Manager 一键安装本插件时会自动 pip install 本文件；
+# 手动安装：在 ComfyUI 的 python 环境下执行 pip install -r requirements.txt
+
+requests>=2.28.0        # 远程 LLM / API 预设
+openpyxl>=3.0.0         # Excel 节点读取 .xlsx
+
+# ---------------------------------------------------------------------------
+# 可选依赖：仅「本地 GGUF」LLM 需要 llama-cpp-python
+# 不装也能正常使用——远程 LM Studio / 远程 API 两种 LLM 不受影响，
+# 仅「本地 GGUF」模式不可用（节点会提示缺少 llama_cpp）。
+#
+# 推荐：安装预编译 wheel（免本地编译，无需 CUDA Toolkit / VS Build Tools）
+#   社区通用来源：https://github.com/JamePeng/llama-cpp-python/releases
+#   （覆盖 CUDA 12.4 / 12.6 / 12.8 / 13.1，Python 3.10~3.14，Windows / Linux x64，
+#     以 releases 页面实际发布的版本为准）
+#   下载对应 CUDA 版本 + Python 版本的 whl 后执行：
+#     pip install <下载的whl文件名>
+#
+# 或从源码编译（需要本机 CUDA Toolkit 与 C 编译器）：
+#   Windows（PowerShell）:
+#     $env:CMAKE_ARGS = "-DGGML_CUDA=on"
+#     pip install "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git"
+#   Linux / macOS:
+#     CMAKE_ARGS="-DGGML_CUDA=on" pip install "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git"
+# ---------------------------------------------------------------------------
