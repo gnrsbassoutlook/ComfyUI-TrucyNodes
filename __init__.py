@@ -46,12 +46,14 @@ def _safe_import(module_name, class_names):
 )
 
 # LLM / ref2v 节点族（合并自 ComfyUI-TrucyLLM，2026-10-16）
-#   trucy_skill_runner.py —— Skill Runner Trucy：LLM / Skill Loader / Chat / Prompt / Unload
-#   trucy_ref2v.py        —— ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
+#   trucy_skill_runner.py —— Skill Runner Trucy：LLM / Skill Loader / Chat / Vision(图像推理) /
+#                           Prompt (H3/QWI) / Unload
+#   trucy_ref2v.py        —— H3 ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
 (TrucyLLM, TrucySkillLoader, TrucyChat, TrucyPromptH3QWI, TrucyUnloadModel) = _safe_import(
     "trucy_skill_runner",
     ["TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
 )
+(TrucyVisionInfer,) = _safe_import("trucy_skill_runner", ["TrucyVisionInfer"])
 (TrucyH3RefEncode, TrucyH3PromptEncode, TrucyH3RefToVideo) = _safe_import(
     "trucy_ref2v",
     ["TrucyH3RefEncode", "TrucyH3PromptEncode", "TrucyH3RefToVideo"],
@@ -110,7 +112,9 @@ optional_nodes = {
     "TrucyChat": TrucyChat,
     "TrucyPromptH3QWI": TrucyPromptH3QWI,
     "TrucyUnloadModel": TrucyUnloadModel,
-    # ref2v Trucy 节点族
+    # Vision Trucy 节点族（图像推理，不调用 Skill）
+    "TrucyVisionInfer": TrucyVisionInfer,
+    # H3 ref2v Trucy 节点族
     "TrucyH3RefEncode": TrucyH3RefEncode,
     "TrucyH3PromptEncode": TrucyH3PromptEncode,
     "TrucyH3RefToVideo": TrucyH3RefToVideo,
@@ -167,10 +171,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
     "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
-    # ref2v Trucy 节点族（H3 Ref2VA 编码/缓存）
-    "TrucyH3RefEncode": "🚀 ref2v Trucy · 参考编码（缓存层）",
-    "TrucyH3PromptEncode": "🚀 ref2v Trucy · 提示词编码（出口）",
-    "TrucyH3RefToVideo": "🚀 ref2v Trucy · 参考转视频（合并版）",
+    # Vision Trucy 节点族（图像推理，不调用 Skill）
+    "TrucyVisionInfer": "🚀 Vision Trucy · 图像推理",
+    # H3 ref2v Trucy 节点族（H3 Ref2VA 编码/缓存）
+    "TrucyH3RefEncode": "🚀 H3 ref2v Trucy · 参考编码（缓存层）",
+    "TrucyH3PromptEncode": "🚀 H3 ref2v Trucy · 提示词编码（出口）",
+    "TrucyH3RefToVideo": "🚀 H3 ref2v Trucy · 参考转视频（合并版）",
 }
 
 WEB_DIRECTORY = "./web"
@@ -220,8 +226,8 @@ except Exception as _e:  # 非 ComfyUI 环境（单测直 import）时静默跳�
 
 _LLM节点数 = sum(1 for k in NODE_CLASS_MAPPINGS
                  if k in ("TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI",
-                          "TrucyUnloadModel", "TrucyH3RefEncode", "TrucyH3PromptEncode",
-                          "TrucyH3RefToVideo"))
+                          "TrucyUnloadModel", "TrucyVisionInfer", "TrucyH3RefEncode",
+                          "TrucyH3PromptEncode", "TrucyH3RefToVideo"))
 print("\033[36m[TrucyNodes]\033[0m "
-      f"{len(NODE_CLASS_MAPPINGS)} nodes | Skill Runner Trucy + ref2v Trucy 已合并入本包"
-      f"（LLM 节点 {_LLM节点数}/8；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")
+      f"{len(NODE_CLASS_MAPPINGS)} nodes | Skill Runner Trucy + Vision Trucy + H3 ref2v Trucy 已合并入本包"
+      f"（LLM 节点 {_LLM节点数}/9；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")

@@ -82,7 +82,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 *   **🚀 Skill Runner Trucy · LLM**：三种大脑一个下拉切换——
     *   **局域网LM Studio**（`http://<Mac-IP>:1234/v1`，默认 `gemma-4-e4b-it`）
-    *   **远程API**：DeepSeek / OpenAI / 任何 OpenAI 兼容服务（`api_base` + `api_key` + `model`；只写域名如 `https://api.deepseek.com` 自动补 `/v1`）
+    *   **远程API**：DeepSeek / OpenAI / 任何 OpenAI 兼容服务（`api_base` + `api_key` + `model`；只写域名如 `https://api.deepseek.com` 自动补 `/v1`）。**`model` 是必填自由文本框**——任意模型 ID 随手填，含中转站模型名（如 `gemini-3.1-flash-lite-preview`）；「API预设」选中只帮填、不锁死，之后随便改
     *   **本地GGUF**：本机显卡跑 `ComfyUI/models/LLM`（含子文件夹）下的 gguf，带 mmproj 视觉投影、`n_ctx` / `n_gpu_layers` / `n_batch` 与 Qwen3.8 系思考控制
 *   **🚀 Skill Runner Trucy · Skill Loader**：扫描内置 `skills/`（及 `comfyUI-llama-TE/skills`，存在时自动兼容）；可固定选一个，也可交给大脑自动匹配。
 *   **🚀 Skill Runner Trucy · Chat**：大脑 + Skill + 提示词 → 文本，带 **12 个参考素材槽位**（🖼️ 图1-9 / 🎵 音1-3）。空槽位跳过并记日志，绝不卡流水线。
@@ -91,7 +91,14 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 **API预设地址簿**：LLM 节点带「API预设」下拉 + 「＋ 保存为API预设」按钮，存于插件目录 `api_presets.json`（**本地明文含 Key，切勿外发整个插件目录**）。
 
-### 7. ref2v Trucy（MiniMax H3 参考生视频）
+### 7. Vision Trucy（图像推理）
+纯**系统提示词 + 用户提示词 + 图片 → 文本**——**不经过 Skill Loader**（与 Skill Runner 家族的唯一区别即此）。形态对标 `comfyUI-llama-TE` 的 `QwenTE图像推理`，同样 **8 个图片输入**。
+
+*   **🚀 Vision Trucy · 图像推理**：LLM（三种大脑任意）+「输入模式」（图片/文本）+ 系统/用户提示词 + 🖼️ 参考图1-8（+ 🎵 参考音频1-3）→ 文本。适合批量图片打标/描述、参考素材分析（如把三视图/场景图喂给 H3 ref2v 管线前先过一遍）、或任何视觉问答——提示词框直达，零 Skill 机制。
+*   复用整套媒体层：槽位空值安全、`<Picture N>` / `<imageN>` 标签（自动识别，H3 兜底）、质量层只记日志不打断。
+*   **注意**：图片能否真到模型取决于大脑——本地 GGUF 需选 mmproj 投影；DeepSeek API 现已支持图片（返回模型名为 `deepseek-flash`）；纯文本模型在图片模式下会报错，把「输入模式」切到文本即可。
+
+### 8. H3 ref2v Trucy（MiniMax H3 参考生视频）
 官方 MiniMax H3 Ref2VA 管线的参考 conditioning，双形态任意选（参考编码数学逐位一致，单测对冲）：
 
 *   **🚀 ref2v Trucy · 参考编码（缓存层）**：参考图/音频 + 双 VAE → AV latent + ref_data。**刻意没有 prompt 输入**——只改提示词时 ComfyUI 内置缓存直接跳过 VAE 重编码。

@@ -83,7 +83,7 @@ A **skill executor** that turns any OpenAI-compatible brain into a node-driven p
 
 *   **🚀 Skill Runner Trucy · LLM**: three brain types in one dropdown —
     *   **LAN LM Studio** (`http://<Mac-IP>:1234/v1`, default `gemma-4-e4b-it`)
-    *   **Remote API**: DeepSeek / OpenAI / any OpenAI-compatible service (`api_base` + `api_key` + `model`; bare domains like `https://api.deepseek.com` auto-complete to `/v1`)
+    *   **Remote API**: DeepSeek / OpenAI / any OpenAI-compatible service (`api_base` + `api_key` + `model`; bare domains like `https://api.deepseek.com` auto-complete to `/v1`). The `model` box is a free-text required field — type any model ID, including relay/aggregator names like `gemini-3.1-flash-lite-preview`; API presets only pre-fill it and never lock it
     *   **Local GGUF**: runs `.gguf` files from `ComfyUI/models/LLM` (subfolders included) on your own GPU, with mmproj vision projector, `n_ctx` / `n_gpu_layers` / `n_batch`, and Qwen3.8-style thinking controls
 *   **🚀 Skill Runner Trucy · Skill Loader**: scans the bundled `skills/` (plus `comfyUI-llama-TE/skills` when present); fix one skill or let the brain auto-pick.
 *   **🚀 Skill Runner Trucy · Chat**: brain + skill + prompt → text, with **12 reference slots** (🖼️ images 1-9 / 🎵 audio 1-3). Empty slots are skipped and logged, never crash the pipeline.
@@ -92,7 +92,14 @@ A **skill executor** that turns any OpenAI-compatible brain into a node-driven p
 
 **API preset address book**: the LLM node carries an `API Preset` dropdown + `+ Save as API Preset` button (saved to `api_presets.json` in the plugin folder — it contains keys in plaintext, do not share the folder).
 
-### 7. ref2v Trucy (MiniMax H3 Ref2VA)
+### 7. Vision Trucy (image reasoning)
+Pure **system prompt + user prompt + images → text** — **no Skill Loader involved** (that's the only difference from the Skill Runner family). Modeled after `comfyUI-llama-TE`'s `QwenTE图像推理`, with the same **8 image inputs**.
+
+*   **🚀 Vision Trucy · Image Reasoning**: LLM (any of the three brain types) + `input mode` (image / text) + system & user prompts + 🖼️ reference images 1-8 (+ 🎵 audio 1-3) → text. Great for batch image captioning, reference-asset analysis (e.g. feeding character sheets / locations into the H3 ref2v pipeline), or any vision Q&A — straight from a prompt box, zero skill machinery.
+*   Reuses the whole media layer: null-safe slots, `<Picture N>` / `<imageN>` tagging (auto-detected, H3 fallback), quality logging without interruption.
+*   **Note**: whether images actually reach the model depends on the brain. Local GGUF needs an mmproj projector; DeepSeek's API now accepts images (returns model `deepseek-flash`); text-only models will error on image mode — switch the mode to text.
+
+### 8. H3 ref2v Trucy (MiniMax H3 Ref2VA)
 Reference-to-video conditioning for the official MiniMax H3 pipeline, in two interchangeable forms (identical reference-encoding math, verified by unit tests):
 
 *   **🚀 ref2v Trucy · Reference Encode (cache layer)**: reference images/audio + dual VAE → AV latent + ref_data. **Deliberately has no prompt input** — change the prompt and ComfyUI's built-in node cache skips VAE re-encoding entirely.

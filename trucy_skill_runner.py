@@ -199,7 +199,14 @@ class TrucyLLM:
         else:
             proj选项 = ["(无)"]
         return {
-            "required": {},
+            "required": {
+                "model": ("STRING", {
+                    "default": "gemma-4-e4b-it",
+                    "tooltip": "【模型名·可自由填写】任意 OpenAI 兼容模型 ID：LM Studio 用 /v1/models 列表里的 id；"
+                               "DeepSeek 用 deepseek-chat；中转站/第三方用其模型名，如 gemini-3.1-flash-lite-preview。"
+                               "「API预设」选中只会帮填此框，之后可随手改成任何模型名（本地GGUF 模式下忽略）。",
+                }),
+            },
             "optional": {
                 "LLM类型": (LLM类型选项, {
                     "default": "局域网LM Studio",
@@ -525,6 +532,101 @@ class TrucyChat:
             messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
         )
         _日志(f"对话 ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
+        result = _清洗输出(content)
+        # 基础质量检查：只记日志，不打断（毫秒级纯 Python）
+        问题 = 检查通用(result)
+        if 问题:
+            _日志(f"质量模块: {汇总(问题)}")
+        return (result,)
+
+
+# ---------------------------------------------------------------------------
+# 节点 3.5：Vision (图像推理)
+#   —— 对标 comfyUI-llama-TE 的 QwenTE图像推理：LLM + 系统/用户提示词 + 图片 → 文本，
+#      不经过 Skill Loader（区别于 Chat/Prompt 的 skill 通道）；图片输入 8 个与 llama-TE 对齐。
+# ---------------------------------------------------------------------------
+class TrucyVisionInfer:
+    """LLM + 系统提示词 + 用户提示词 + 图片（8 槽）→ 文本。不调用 Skill。"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        optional = {
+            "输入媒体标签逻辑": (标签逻辑选项, {
+                "default": 标签逻辑选项[0],
+                "tooltip": "参考素材标签用哪套规范：自动识别 = 未接 Skill 按 H3 兜底（<Picture N>）；"
+                           "H3 = <Picture N>/<Audio N>；Qwen-Image-2.1 = <imageN>（多图必须用，单图不加标签）。",
+            }),
+            "参考图最长边": ("INT", {
+                "default": 0, "min": 0, "max": 2048, "step": 64,
+                "tooltip": "发给 LLM 前参考图的缩放边长，0 = 标准 1280。"
+                           "小上下文LLM（如 LM Studio 8192）建议 768 或 512，防止视觉 token 挤爆上下文。",
+            }),
+        }
+        optional.update(图片槽输入(数量=8))   # 与 llama-TE 的 QwenTE图像推理 对齐：8 个图片输入
+        optional.update(音频槽输入())
+        return {
+            "required": {
+                "LLM": ("TRUCY_BRAIN",),
+                "输入模式": (["图片", "文本"], {
+                    "default": "图片",
+                    "tooltip": "图片 = 分析接入的参考图（1-8 槽）与参考音频；文本 = 纯文字推理，忽略所有媒体输入。",
+                }),
+                "系统提示词": ("STRING", {
+                    "default": "你是一个专业的图像分析助手。请仔细观察用户提供的图片，"
+                               "给出准确、详细、结构清晰的描述与分析。",
+                    "multiline": True,
+                }),
+                "提示词": ("STRING", {
+                    "default": "请详细描述这张图片的内容。",
+                    "multiline": True,
+                }),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
+                "max_tokens": ("INT", {"default": 2048, "min": 256, "max": 32768, "step": 256}),
+            },
+            "optional": optional,
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("文本",)
+    FUNCTION = "run"
+    CATEGORY = "TrucyNodes/Vision"
+
+    def run(self, LLM, 输入模式, 系统提示词, 提示词, temperature, max_tokens,
+            输入媒体标签逻辑=标签逻辑选项[0], 参考图最长边=0, **kwargs):
+        if 输入被静音(LLM):
+            _日志("图像推理节点: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
+                  "取消静音或改接 LLM 后重跑")
+            return ("",)
+        # 多参考素材收集（空值安全：None/零尺寸/坏槽位/被静音跳过不报错，也不发给 LLM）
+        图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None) if 输入模式 == "图片" else []
+        视频条目 = []  # 视频参考端口已摘除（99.99% 不用）；媒体层后端保留，加一行即复活
+        音频条目 = 收集音频(kwargs) if 输入模式 == "图片" else []
+
+        # 标签家族：未接 Skill，按下拉指定；自动识别时 H3 兜底（<Picture N>）
+        有素材 = bool(图片条目 or 音频条目)
+        图像标签模式 = 解析标签家族(输入媒体标签逻辑, None, 有素材=有素材)
+
+        messages = []
+        system_text = (系统提示词 or "").strip()
+        if system_text:
+            messages.append({"role": "system", "content": system_text})
+        user_text = str(提示词 or "").strip()
+        if not user_text and not 有素材:
+            raise ValueError("提示词不能为空（也未接入任何参考素材）。")
+        if not user_text:
+            user_text = "请分析提供的输入。"
+        if 有素材:
+            user_text += "\n\n" + 构建素材清单(图片条目, 视频条目, 音频条目, 图像标签模式)
+        messages.append({"role": "user", "content": user_text})
+
+        媒体部分 = 构建媒体部分(图片条目, 视频条目, 音频条目, 图像标签模式)
+        _日志(f"图像推理 → {LLM.describe()} | 模式={输入模式} | "
+              f"输入媒体标签={'QWI(<imageN>)' if 图像标签模式 else 'H3(<Picture N>)'} | "
+              f"images={len(图片条目)} audios={len(音频条目)}")
+        content, usage = LLM.chat(
+            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+        )
+        _日志(f"图像推理 ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
         result = _清洗输出(content)
         # 基础质量检查：只记日志，不打断（毫秒级纯 Python）
         问题 = 检查通用(result)

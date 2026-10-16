@@ -240,7 +240,7 @@ class TrucyH3RefEncode:
     RETURN_TYPES = ("LATENT", "*")
     RETURN_NAMES = ("latent", "ref_data")
     FUNCTION = "run"
-    CATEGORY = "TrucyNodes/ref2v"
+    CATEGORY = "TrucyNodes/H3 ref2v"
 
     def run(self, width, height, length, ref_image_size="match",
             vae=None, audio_vae=None, **kwargs):
@@ -294,7 +294,7 @@ class TrucyH3PromptEncode:
     RETURN_TYPES = ("CONDITIONING",)
     RETURN_NAMES = ("positive",)
     FUNCTION = "run"
-    CATEGORY = "TrucyNodes/ref2v"
+    CATEGORY = "TrucyNodes/H3 ref2v"
 
     def run(self, clip, prompt, ref_data=None):
         ref_items, ref_blocks = [], []
@@ -472,7 +472,7 @@ class TrucyH3RefToVideo:
     RETURN_TYPES = ("LATENT", "CONDITIONING")
     RETURN_NAMES = ("latent", "positive")
     FUNCTION = "run"
-    CATEGORY = "TrucyNodes/ref2v"
+    CATEGORY = "TrucyNodes/H3 ref2v"
 
     def run(self, width, height, length, ref_image_size="match",
             clip=None, prompt="", vae=None, audio_vae=None, **kwargs):
