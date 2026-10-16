@@ -10,6 +10,13 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
+### [2026-10-17] Executor Cleanup: Generic VLM Labels + Sampling Fine-Tuning + llama.cpp Speed Knobs
+🏷️ **VLM Runner labels are now generic** — connected images are tagged **图片1 … 图片8** and the video **视频1** inside the node, and the prompt asks for per-image descriptions. The H3/QWI tag dropdown is gone from this node (it never belonged to a skill workflow); Chat/Prompt keep their skill-family tag logic.
+🛡️ **Null-safety on every media input** — all 8 image slots and the video port skip empty / muted / broken inputs with a log line (video mode with nothing usable gives a clear designed error, never a raw traceback).
+🎚️ **Sampling fine-tuning on all three executors** (Chat / Prompt / VLM Runner): `top_p` / `top_k` / `repeat_penalty` / `seed` / `保留思考过程` — every default is "not set, not sent", so old workflows behave exactly as before. `top_p`/`seed` are standard OpenAI request fields (local + LM Studio + remote); `top_k`/`repeat_penalty` are llama.cpp-native (local + LM Studio; a strict API rejecting them triggers an automatic drop-and-retry).
+⚡ **llama.cpp speed knobs on the loader** (modeled after llama-TE, Local GGUF only): KV cache K/V quantization (`q8_0` etc., default = untouched f16) and a three-state Flash Attention switch (default = don't touch llama.cpp's behavior).
+🧹 The legacy generic `图片` port on Chat / Prompt is removed — the 9 numbered image slots cover it (old workflows wired to it need a one-time re-wire).
+
 ### [2026-10-16] The "Brain & Reference" Update: LLM Loader + Skill Runner + VLM Runner + MiniMax H3 ref2v
 🧠 **LLM Loader Trucy** (merged from ComfyUI-TrucyLLM): the brain loader — one node, three brain types (LAN LM Studio / remote API / local GGUF). It only loads a brain and never runs a skill; its **LLM** output port feeds both the **Skill Runner Trucy** family and the **VLM Runner Trucy** node.
 🛠️ **Skill Runner Trucy**: the real skill executors — Skill Loader → Chat / Prompt (H3·QWI) → Unload Model, plus the API preset address book and the zero-interruption quality layer.
@@ -87,6 +94,7 @@ Loads one of three brain types and outputs it on the **LLM** port. It runs no sk
     *   **LAN LM Studio** (`http://<Mac-IP>:1234/v1`, default `gemma-4-e4b-it`)
     *   **Remote API**: DeepSeek / OpenAI / any OpenAI-compatible service (`api_base` + `api_key` + `model`; bare domains like `https://api.deepseek.com` auto-complete to `/v1`). The `model` box is a free-text required field — type any model ID, including relay/aggregator names like `gemini-3.1-flash-lite-preview`; API presets only pre-fill it and never lock it
     *   **Local GGUF**: runs `.gguf` files from `ComfyUI/models/LLM` (subfolders included) on your own GPU, with mmproj vision projector, `n_ctx` / `n_gpu_layers` / `n_batch`, and Qwen3.8-style thinking controls
+    *   **Local-only speed knobs (llama.cpp, modeled after llama-TE — the fastest LLM pack in the community)**: `KV cache K/V type` (default `不指定` = untouched llama.cpp f16; `q8_0` saves VRAM and is often faster on big models with long context) and `Flash Attention` (three-state: `off` = don't touch llama.cpp's default; `on` / `off` = explicit override). These are load-time llama.cpp parameters — **they only exist for Local GGUF**; equivalent tuning for LM Studio / remote APIs happens in their own UIs
 
 **API preset address book**: the loader node carries an `API Preset` dropdown + `+ Save as API Preset` button (saved to `api_presets.json` in the plugin folder — it contains keys in plaintext, do not share the folder).
 
@@ -94,19 +102,27 @@ Loads one of three brain types and outputs it on the **LLM** port. It runs no sk
 The real skill-executor family: **LLM Loader → Skill Loader → Chat / Prompt → Unload Model**.
 
 *   **🚀 Skill Loader Trucy**: scans the bundled `skills/` (plus `comfyUI-llama-TE/skills` when present); fix one skill or let the brain auto-pick.
-*   **🚀 Skill Runner Trucy · Chat**: brain + skill + prompt → text, with **12 reference slots** (🖼️ images 1-9 / 🎵 audio 1-3). Empty slots are skipped and logged, never crash the pipeline.
+*   **🚀 Skill Runner Trucy · Chat**: brain + skill + prompt → text, with **12 reference slots** (🖼️ images 1-9 / 🎵 audio 1-3). Empty slots are skipped and logged, never crash the pipeline. (The old generic `图片` port is gone — the 9 image slots cover it with exact numbering.)
 *   **🚀 Skill Runner Trucy · Prompt (H3/QWI)**: two official prompt-skill families in one node — **H3** (MiniMax video prompts, `[Shot N]` storyboards with soundscape/music) and **Qwen-Image-2.1** (image prompt rewriting). Quality layer checks output and logs issues with **zero pipeline interruption** (optional one-shot auto-repair, off by default).
 *   **🚀 Skill Runner Trucy · Unload Model**: frees local GGUF VRAM before sampling; attach its wildcard `upstream` input to the prompt node's output.
+*   **Sampling fine-tuning** (Chat / Prompt / VLM Runner, every default = "not set, not sent"): `top_p` / `seed` are standard OpenAI request fields (local + LM Studio + remote); `top_k` / `repeat_penalty` are llama.cpp-native (local + LM Studio; strict APIs ignore them, and a 400 rejection triggers an automatic drop-and-retry); `保留思考过程` is Local-GGUF-thinking only. See section 8 for the full breakdown.
+*   **Unload after inference** (on all three executors — Chat / Prompt / VLM Runner, off by default): Local GGUF only — automatically unloads the model after inference to hand VRAM back (the next inference reloads it, slightly slower). When several executors share one LLM Loader, enable it on the last one; or keep using the dedicated Unload Model node. No effect on remote APIs / LM Studio (the model isn't local).
 
 ### 8. VLM Runner Trucy (image / video reasoning)
 Pure **system prompt + user prompt + images or video → text** — **no Skill Loader involved** (that's the only difference from the Skill Runner family). Modeled after `comfyUI-llama-TE`'s `QwenTE图像推理` and extended with video input.
 
 *   **🚀 VLM Runner Trucy**: LLM (any of the three brain types) + `input mode` (**image / video — mutually exclusive, never both**) + system & user prompts → text:
-    *   **Image mode**: 🖼️ reference images 1-8, tagged `<Picture N>` / `<imageN>` (auto-detected, H3 fallback)
-    *   **Video mode**: 🎬 one video (LoadVideo output). Local GGUF brains receive the **video file itself** — llama.cpp's mtmd decodes it via ffmpeg subprocesses (needs `ffmpeg` + `ffprobe` on PATH; ComfyUI packs usually ship them) and Qwen-VL reads it natively at ~4 fps with timestamps. Remote brains, missing ffmpeg, or a failed native send **automatically degrade to evenly-sampled frames** (`视频抽帧数`, default 8) sent as images — each frame keeps its timestamp, so temporal analysis survives the fallback
+    *   **Image mode**: 🖼️ reference images 1-8. The node tags them internally as **图片1 … 图片8** (generic plain-language labels — no H3/QWI skill family applies to this node), and the prompt asks the model to describe each image separately. Slot numbers are preserved (a muted/broken slot is skipped and logged, never renumbered)
+    *   **Video mode**: 🎬 one video (LoadVideo output), tagged **视频1**. Local GGUF brains receive the **video file itself** — llama.cpp's mtmd decodes it via ffmpeg subprocesses (needs `ffmpeg` + `ffprobe` on PATH; ComfyUI packs usually ship them) and Qwen-VL reads it natively at ~4 fps with timestamps. Remote brains, missing ffmpeg, or a failed native send **automatically degrade to evenly-sampled frames** (`视频抽帧数`, default 8) sent as images — each frame keeps its timestamp, so temporal analysis survives the fallback
     *   Wiring both sides at once? The mode dropdown decides what goes to the brain; the other side is ignored with a log line
+*   **Null-safe on every media input**: an empty / muted / broken image slot or video port is skipped with a log line (or, in video mode with nothing usable, a clear designed error) — never a raw traceback, never an empty prompt sent to the brain
 *   **No text mode by design** — pure-text chat is the Skill Runner's Chat node. A mode with nothing connected fails with a clear message instead of sending an empty prompt.
-*   Reuses the whole media layer: null-safe slots, quality logging without interruption.
+*   **Sampling fine-tuning** (all three executors share these controls; every default = "not set, not sent" — old workflows keep their exact behavior):
+    *   `top_p` / `seed` are **standard OpenAI request fields** — they work per-request on Local GGUF, LM Studio, and remote APIs alike
+    *   `top_k` / `repeat_penalty` are **llama.cpp-native fields** — they work on Local GGUF and LM Studio; strict OpenAI-compatible APIs have no such fields (they're usually ignored, and if an endpoint rejects them with HTTP 400 the node drops them and retries once, so the pipeline never breaks)
+    *   `保留思考过程` (keep thinking): Local GGUF thinking models only — keeps the inline `<think>…</think>` block instead of stripping it (remote reasoning models return thinking separately on the API side, so this switch does nothing for them)
+    *   Equivalent tuning beyond temperature/top_p for remote brains belongs in the LM Studio / API provider's own UI
+*   **Unload after inference** (off by default): Local GGUF only — unloads the model after inference to hand VRAM back (the next inference reloads it, slightly slower); no effect on remote brains.
 *   **Note**: what actually reaches the model depends on the brain. Local GGUF needs an mmproj projector; DeepSeek's API now accepts images (returns model `deepseek-flash`) — its video mode falls back to sampled frames.
 
 ### 9. H3 ref2v Trucy (MiniMax H3 Ref2VA)
@@ -148,6 +164,97 @@ CUDA + Python version. Building from source is also supported (see the
 comments in `requirements.txt`).
 
 ---
+
+## 🧭 Model & Parameter Recommendations
+
+> **One rule to remember first**: `n_ctx`, thinking mode, reasoning effort,
+> `n_gpu_layers`, `n_batch`, KV cache quantization, Flash Attention and the mmproj
+> projector are **only tuned inside the node for Local GGUF** (they are llama.cpp
+> load-time parameters). For LM Studio and remote APIs those live server-side
+> (the LM Studio load screen / your API provider).
+> **Request-level sampling** (`temperature` / `max_tokens` / `top_p` / `seed`) are
+> standard OpenAI request fields — all three brain types accept them per request.
+> `top_k` / `repeat_penalty` are llama.cpp-native: Local GGUF and LM Studio honor
+> them; strict OpenAI-compatible APIs don't have those fields (a 400 rejection
+> triggers an automatic drop-and-retry).
+> **Qwen official sampling**: thinking ON → `temperature=1.0 / top_p=0.95 /
+> top_k=20`; thinking OFF → `temperature=0.7 / top_p=0.80 / top_k=20`. Local GGUF
+> can now set these precisely on the node; mirror them in the LM Studio / API UI.
+
+### Local GGUF (the loader's Local GGUF section)
+
+| Model | n_ctx | Thinking | Reasoning effort | mmproj | Notes |
+|---|---|---|---|---|---|
+| Qwen3.8-27B IQ2_XXS (16 GB card — this project's tested config) | 16384 | ON | medium | required for vision | Daily driver on a 5060Ti 16 GB; xhigh gains little at IQ2 and is much slower |
+| Qwen3.8-27B Q4_K_M+ (24 GB+ card) | 32768 | ON | xhigh | required for vision | xhigh only pays off once quantization is gentler |
+| Qwen3-VL / Qwen3.5-VL / Qwen3.6-VL series | 16384–32768 | per model (Qwen3-VL uses force_reasoning) | — | required | VL models cannot see images without an mmproj |
+| 7B–14B small models | 8192 | OFF or low | low | optional | Fast but drifts on strict formats — fine for tagging, keep away from the big H3 skill |
+
+Local ground rules:
+
+- The H3 skill needs at least 8192 ctx; each 1280-px reference image costs ~1K+
+  tokens, so 3 images + skill text blow past 8K easily — **16384 is the safe pick**
+- `n_gpu_layers=-1` (everything on GPU); when VRAM runs out, rescue in this
+  order: lower it → lower `n_ctx` → drop 参考图最长边 (max image edge) to 768/512
+- `n_batch` 512 is the speed/VRAM sweet spot; drop to 256 under pressure
+- **Speed knobs borrowed from llama-TE** (Local GGUF only): `KV cache K/V type =
+  q8_0` saves VRAM and is often faster on big models with long context (quality
+  cost is small; default `不指定` keeps llama.cpp's native f16 — zero behavior
+  change). `Flash Attention` is three-state: `不开启` doesn't touch llama.cpp's
+  default, `开启` / `关闭` explicitly override. Both are load-time parameters, so
+  changing them reloads the model once
+- To hand VRAM back right after inference: enable **推理后自动卸载** (unload
+  after inference) on the executor node (off by default, Local GGUF only — the
+  next inference reloads the model, slightly slower), or keep using the
+  dedicated Unload Model node
+
+### LAN LM Studio
+
+| Model | Server-side n_ctx | Node temperature | Node max_tokens | Notes |
+|---|---|---|---|---|
+| gemma-4-e4b-it | ≥ 16384 (8192 makes thinking explode) | 0.7 | 4096 | Reads constraints but never converges its thinking; for production prefer a Qwen |
+| qwen3-vl / qwen3 series | 16384 | 0.7 (1.0 with thinking on) | 4096 | Lightweight vision/tagging workhorse |
+| others | ¼–½ of the model's max | 0.7 | 4096 | n_ctx and the thinking switch live in the LM Studio load screen, not in ComfyUI |
+
+### Remote API
+
+| Model | temperature | max_tokens | Notes |
+|---|---|---|---|
+| deepseek-chat | 0.7 (0.3–0.5 for structured H3/QWI) | 4096–8192 | Accepts images now; context is server-side — the node only tunes sampling |
+| deepseek-reasoner | leave default (thinking model self-regulates) | ≥ 8192 | Thinking also burns max_tokens — too small gets truncated |
+| gpt-4o / gpt-4.1 etc. | 0.7 | 4096–8192 | General purpose; some newer models only expose reasoning-effort tiers — check their docs |
+| gemini-\*-flash-lite (relay) | 0.7 | 4096 | Fast and light; vision works, occasional detail misreads |
+| other relay models | 0.7 | 4096 | Follow the provider's docs; switch instantly via the API Preset dropdown |
+
+### Sampling by task (all three executor nodes)
+
+| Task | temperature | max_tokens | Notes |
+|---|---|---|---|
+| H3 video prompt | 0.3–0.5 | ≥ 4096 | Structured output wants stability — low temp keeps storyboards in line |
+| QWI image prompt | 0.5–0.7 | ≥ 4096 | — |
+| VLM image/video description | 0.3–0.5 | 2048–4096 | Descriptions must be accurate — don't let the model improvise |
+| Chat / creative talk | 0.8–1.0 | 4096 | More divergence, more ideas — and more drift |
+
+### Control cheat sheet
+
+| Control | Plain language | When to touch it |
+|---|---|---|
+| `n_ctx` | The model's workbench: skill text + image tokens + generation all share it | Raise it on "context exceeded", or shrink images / lower n_ctx |
+| Thinking mode | Switch for thinking-style models: ON = better but slower | Keep ON for strict formats like H3 |
+| Reasoning effort | Only active with thinking ON: xhigh slowest/best · medium balanced · low fastest | medium is plenty at IQ2 quantization |
+| `n_gpu_layers` | How many layers live on the GPU: -1 = all, 0 = pure CPU | Lower it (e.g. 20) when VRAM overflows |
+| `n_batch` | Prompt tokens processed per batch: bigger = faster, hungrier | Drop to 256 under VRAM pressure |
+| KV cache K/V type | (Local GGUF only, llama.cpp) How precisely the KV cache is stored: q8_0 saves VRAM, often faster too | q8_0 for big models / long ctx; default 不指定 = llama.cpp's native f16 |
+| Flash Attention | (Local GGUF only, llama.cpp) Faster attention when on; three-state so the default stays untouched | Try 开启; if the environment misbehaves, 关闭 |
+| `temperature` | Higher = more divergence: 0.3 reproducible, 1.0 creative | See the task table above |
+| `max_tokens` | Max tokens per reply; thinking also spends this budget | Raise it when output gets truncated |
+| `top_p` | Keep only the top-p probability mass each step (standard OpenAI field — works on local, LM Studio, and remote) | Qwen reference: 0.95 thinking / 0.80 non-thinking; 0 = not set |
+| `top_k` | Keep only the top-k candidates each step (llama.cpp-native: local + LM Studio) | Qwen reference: 20; 0 = not set |
+| `repeat_penalty` | >1 suppresses repetition loops (llama.cpp-native: local + LM Studio) | Try 1.05–1.15 when the model repeats itself; 1.0 = not set |
+| `seed` | Fix the randomness for reproducible results (standard OpenAI field) | Fix it when A/B-testing prompt changes; 0 = not set (random) |
+| Keep thinking | Keep the model's <think> block in the output (Local GGUF thinking models only) | When you want to inspect the reasoning; default off |
+| Max image edge | How far images are shrunk before sending | 768/512 on small ctx to avoid token blowout |
+| Unload after inference | Throws the model out of VRAM after inference (next inference reloads, slightly slower) | Enable before image gen/sampling needs the VRAM; no effect on remote brains |
 
 ## 📄 License
 MIT License

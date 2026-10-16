@@ -72,6 +72,74 @@ class TrucyBrainError(Exception):
     """LLM调用失败（携带可读的中文原因）。"""
 
 
+# ---------------------------------------------------------------------------
+# llama.cpp 专有加载参数解析（仅本地 GGUF 生效；远程API/LM Studio 无此概念，
+# 等效调优请在各自界面设置——参考 llama-TE 的同款三态设计）
+# ---------------------------------------------------------------------------
+# KV 缓存量化：默认(不指定) = 不传该参数，完全保持 llama.cpp 原生行为（f16）。
+# 数值 = GGML 类型枚举（ggml.h：F16=1, Q4_0=2, Q5_0=6, Q5_1=7, Q8_0=8）。
+KV缓存类型选项 = ("默认(不指定)", "q8_0", "q5_1", "q5_0", "q4_0")
+_KV类型数值 = {"f16": 1, "q4_0": 2, "q5_0": 6, "q5_1": 7, "q8_0": 8}
+
+# Flash Attention 三态：不开启 = 不碰 llama.cpp 默认（构建时默认开则开）；
+# 开启/关闭 = 显式覆盖 flash_attn_type（1=开，0=关）。
+FlashAttention模式选项 = ("不开启", "开启", "关闭")
+
+
+def _解析kv缓存类型(值):
+    """KV 缓存类型下拉 → GGML 类型 int；默认/空 → None（不传参，保持原生）。"""
+    模式 = str(值 or "").strip()
+    if not 模式 or 模式 in ("默认(不指定)", "默认(F16)", "不指定"):
+        return None
+    名 = 模式.lower()
+    if 名 in _KV类型数值:
+        return _KV类型数值[名]
+    raise TrucyBrainError(f"未知 KV 缓存类型：{模式}（可选：{'/'.join(KV缓存类型选项)}）")
+
+
+def _解析flash_attention类型(值):
+    """Flash Attention 三态 → flash_attn_type int；不开启/自动 → None（不碰默认）。"""
+    模式 = str(值 or "").strip()
+    if 模式 in ("", "不开启", "自动"):
+        return None
+    if 模式 == "开启":
+        return 1
+    if 模式 == "关闭":
+        return 0
+    raise TrucyBrainError(f"未知 Flash Attention 模式：{模式}")
+
+
+def _整理采样额外参数(top_p=0.0, top_k=0, repeat_penalty=1.0, seed=0):
+    """把执行节点的采样控件整理成「只含显式设置项」的字典。
+
+    全部默认值 = 不发（老工作流零行为变化）：
+      top_p 0 / top_k 0 / repeat_penalty 1.0 / seed 0 都视为「不指定」。
+    """
+    额外 = {}
+    try:
+        if top_p and float(top_p) > 0:
+            额外["top_p"] = float(top_p)
+    except (TypeError, ValueError):
+        pass
+    try:
+        if top_k and int(top_k) > 0:
+            额外["top_k"] = int(top_k)
+    except (TypeError, ValueError):
+        pass
+    try:
+        rp = float(repeat_penalty)
+        if abs(rp - 1.0) > 1e-6:
+            额外["repeat_penalty"] = rp
+    except (TypeError, ValueError):
+        pass
+    try:
+        if seed and int(seed) > 0:
+            额外["seed"] = int(seed)
+    except (TypeError, ValueError):
+        pass
+    return 额外
+
+
 class TrucyBrain:
     """局域网 LLM LLM（LM Studio / OpenAI 兼容端点）。"""
 
@@ -125,7 +193,8 @@ class TrucyBrain:
             pass
         return []
 
-    def chat(self, messages, temperature=0.7, max_tokens=4096, images=None, 媒体部分=None, model=None):
+    def chat(self, messages, temperature=0.7, max_tokens=4096, images=None, 媒体部分=None, model=None,
+             top_p=0.0, top_k=0, repeat_penalty=1.0, seed=0):
         """
         执行一次 chat completion。
 
@@ -137,6 +206,12 @@ class TrucyBrain:
             媒体部分:    可选，OpenAI 多模态 content parts 列表（文字标签+图片，
                        由 trucy_media 构建；优先于 images）
             model:      可选，覆盖LLM默认模型
+            top_p / top_k / repeat_penalty / seed:
+                       可选采样微调（0/1.0 = 不指定，不发）。
+                       top_p/seed 是 OpenAI 标准请求字段，远程端点按请求生效；
+                       top_k/repeat_penalty 是 llama.cpp 专有字段，LM Studio 等
+                       兼容端点接受，严格的 OpenAI 兼容 API 可能忽略或拒绝
+                       （被 400 拒绝时自动去掉这两个字段重试一次，保流水线不中断）。
 
         返回:
             (content_text, usage_dict)
@@ -161,11 +236,16 @@ class TrucyBrain:
             "temperature": float(temperature),
             "max_tokens": int(max_tokens),
         }
+        采样额外 = _整理采样额外参数(top_p, top_k, repeat_penalty, seed)
+        payload.update(采样额外)
+        if 采样额外:
+            _日志(f"LLM: 采样微调生效 → {'、'.join(sorted(采样额外))}")
 
         # 主候选 + 兜底：端点只写了域名没写 /v1 时（如 https://api.deepseek.com），404 后自动补 /v1 重试
         candidates = [f"{self.api_base}/chat/completions"]
         if not self.api_base.endswith("/v1"):
             candidates.append(f"{self.api_base}/v1/chat/completions")
+        专有字段 = {"top_k", "repeat_penalty"} & set(采样额外)
         try:
             resp = None
             for url in candidates:
@@ -185,6 +265,20 @@ class TrucyBrain:
             )
         except Exception as exc:
             raise TrucyBrainError(f"请求LLM时发生未知错误: {exc}")
+
+        # 端点不认识 llama.cpp 专有采样字段（top_k/repeat_penalty）→ 去掉再试一次，
+        # 不让一次微调把整条批处理流水线打断（连续性优先）
+        if resp.status_code == 400 and 专有字段:
+            _日志(f"LLM: 端点不接受 {'、'.join(sorted(专有字段))}（非 OpenAI 标准字段），"
+                  f"已按端点默认重试——这两个字段对当前远程大脑无效，可留空")
+            for k in 专有字段:
+                payload.pop(k, None)
+            try:
+                resp = self._post(
+                    candidates[-1], headers=self._headers(), json=payload, timeout=self.timeout
+                )
+            except Exception:
+                pass
 
         if not resp.ok:
             if resp.status_code == 401:
@@ -352,7 +446,9 @@ class TrucyLocalBrain:
 
     def __init__(self, gguf路径, mmproj路径="", n_ctx=8192, n_gpu_layers=-1,
                  n_batch=512, 模型根目录=None, enable_thinking=True,
-                 reasoning_effort="medium"):
+                 reasoning_effort="medium",
+                 kv缓存k类型="默认(不指定)", kv缓存v类型="默认(不指定)",
+                 flash_attention="不开启"):
         self.gguf相对 = (gguf路径 or "").strip()
         self.mmproj相对 = (mmproj路径 or "").strip()
         if self.mmproj相对 in ("(无)", "无", "none", "None", "-"):
@@ -373,6 +469,10 @@ class TrucyLocalBrain:
         self.reasoning_effort = str(reasoning_effort or "medium")
         if self.reasoning_effort not in ("xhigh", "medium", "low"):
             self.reasoning_effort = "medium"
+        # llama.cpp 专有加载参数（仅本地 GGUF 生效；默认 = 不传，保持 llama.cpp 原生行为）
+        self.type_k = _解析kv缓存类型(kv缓存k类型)
+        self.type_v = _解析kv缓存类型(kv缓存v类型)
+        self.flash_attn_type = _解析flash_attention类型(flash_attention)
         self.模型根目录 = list(模型根目录 or [])
         self._chat_format = None
         self._校验路径()
@@ -487,7 +587,8 @@ class TrucyLocalBrain:
 
     def _获取模型(self, chat_format=None):
         key = (self.gguf绝对, self.mmproj绝对, self.n_ctx, self.n_gpu_layers,
-               self.n_batch, chat_format, self.enable_thinking, self.reasoning_effort)
+               self.n_batch, chat_format, self.enable_thinking, self.reasoning_effort,
+               self.type_k, self.type_v, self.flash_attn_type)
         llm = TrucyLocalBrain._模型缓存.get(key)
         if llm is not None:
             return llm
@@ -507,6 +608,29 @@ class TrucyLocalBrain:
         # "non-consecutive token position" / hybrid cache 警告
         if "ctx_checkpoints" in 可用参数:
             kwargs["ctx_checkpoints"] = 0
+
+        # llama.cpp 专有提速参数（llama-TE 同款三态：默认=不传，保持原生行为）。
+        # 只对本地 GGUF 有意义——远程API/LM Studio 的等效调优在各自界面。
+        KV说明 = []
+        if self.type_k is not None:
+            if "type_k" in 可用参数:
+                kwargs["type_k"] = self.type_k
+                KV说明.append(f"type_k={self.type_k}")
+            else:
+                _日志("本地LLM: 当前 llama-cpp-python 不支持 type_k（KV缓存量化），已忽略")
+        if self.type_v is not None:
+            if "type_v" in 可用参数:
+                kwargs["type_v"] = self.type_v
+                KV说明.append(f"type_v={self.type_v}")
+            else:
+                _日志("本地LLM: 当前 llama-cpp-python 不支持 type_v（KV缓存量化），已忽略")
+        FA说明 = ""
+        if self.flash_attn_type is not None:
+            if "flash_attn_type" in 可用参数:
+                kwargs["flash_attn_type"] = self.flash_attn_type
+                FA说明 = f"，flash_attn={'开' if self.flash_attn_type else '关'}"
+            else:
+                _日志("本地LLM: 当前 llama-cpp-python 不支持 flash_attn_type，已忽略")
 
         if self._是qwen38():
             # Qwen3.8：先不带 mmproj 构造，加载后按自带模板挂 handler
@@ -534,29 +658,31 @@ class TrucyLocalBrain:
         _日志(f"本地模型已加载: {os.path.basename(self.gguf绝对)}"
               f"（ctx={self.n_ctx}, gpu_layers={self.n_gpu_layers},"
               f" 思考={'开' if self.enable_thinking else '关'}"
-              f"{'/' + self.reasoning_effort if self.enable_thinking else ''}）")
+              f"{'/' + self.reasoning_effort if self.enable_thinking else ''}"
+              f"{'，' + '/'.join(KV说明) if KV说明 else ''}{FA说明}）")
         return llm
 
-    def chat(self, messages, temperature=0.7, max_tokens=4096, images=None, 媒体部分=None, model=None):
+    def chat(self, messages, temperature=0.7, max_tokens=4096, images=None, 媒体部分=None, model=None,
+             top_p=0.0, top_k=0, repeat_penalty=1.0, seed=0):
         llm = self._获取模型(self._chat_format)
         msgs = [dict(m) for m in messages]
         if 媒体部分:
             msgs = _挂载媒体部分(msgs, 媒体部分)
         elif images:
             msgs = _挂载图片(msgs, images)
+        采样额外 = _整理采样额外参数(top_p, top_k, repeat_penalty, seed)
+        if 采样额外:
+            _日志(f"本地LLM: 采样微调生效 → {'、'.join(sorted(采样额外))}")
         try:
             resp = llm.create_chat_completion(
-                messages=msgs, temperature=float(temperature), max_tokens=int(max_tokens)
+                messages=msgs, temperature=float(temperature), max_tokens=int(max_tokens),
+                **采样额外
             )
         except Exception as e:
             err = str(e)
-            # 聊天模板自动识别失败 → 换 qwen 模板重试一次（Qwen 系 GGUF 常见；
-            # Qwen3.8 走自带模板 handler，不适用此兜底）
-            if (self._chat_format is None and not self._是qwen38()
-                    and any(k in err.lower() for k in ("format", "template", "jinja"))):
-                _日志("本地LLM: 自动聊天模板识别失败，改用 qwen 模板重试")
-                self._chat_format = "qwen"
-                llm = self._获取模型("qwen")
+            # 老版本 llama-cpp-python 不认识传入的采样字段 → 去掉重试一次（不打断流水线）
+            if 采样额外 and any(k in err.lower() for k in ("unexpected keyword", "unknown", "invalid")):
+                _日志(f"本地LLM: 当前版本不接受 {'、'.join(sorted(采样额外))}，已按默认重试")
                 try:
                     resp = llm.create_chat_completion(
                         messages=msgs, temperature=float(temperature), max_tokens=int(max_tokens)
@@ -564,9 +690,24 @@ class TrucyLocalBrain:
                 except Exception as e2:
                     raise TrucyBrainError(f"本地模型推理失败: {e2}")
             else:
-                raise TrucyBrainError(
-                    f"本地模型推理失败: {err}。若是显存不足，请调小 n_gpu_layers / n_ctx。"
-                )
+                # 聊天模板自动识别失败 → 换 qwen 模板重试一次（Qwen 系 GGUF 常见；
+                # Qwen3.8 走自带模板 handler，不适用此兜底）
+                if (self._chat_format is None and not self._是qwen38()
+                        and any(k in err.lower() for k in ("format", "template", "jinja"))):
+                    _日志("本地LLM: 自动聊天模板识别失败，改用 qwen 模板重试")
+                    self._chat_format = "qwen"
+                    llm = self._获取模型("qwen")
+                    try:
+                        resp = llm.create_chat_completion(
+                            messages=msgs, temperature=float(temperature), max_tokens=int(max_tokens),
+                            **采样额外
+                        )
+                    except Exception as e2:
+                        raise TrucyBrainError(f"本地模型推理失败: {e2}")
+                else:
+                    raise TrucyBrainError(
+                        f"本地模型推理失败: {err}。若是显存不足，请调小 n_gpu_layers / n_ctx。"
+                    )
         choices = resp.get("choices") or []
         if not choices:
             raise TrucyBrainError("本地模型响应中没有 choices。")
@@ -577,6 +718,42 @@ class TrucyLocalBrain:
             content = message.get("reasoning_content") or ""
         usage = resp.get("usage", {}) or {}
         return str(content), usage
+
+    def 卸载(self):
+        """卸载本实例对应的本地模型（同主模型+投影的所有缓存条目），释放显存。
+
+        返回卸载的 Llama 实例数（0 = 本就未加载）。与类方法 卸载全部 的
+        区别：只卸本实例的模型，不影响工作流里其他 LLM Loader 装的其他模型。
+        批处理中「推理后自动卸载」每次推理后调用 → 下次推理按参数缓存键
+        重新加载（显存让给出图/采样，速度换显存）。
+        """
+        文件对 = (self.gguf绝对, self.mmproj绝对)
+        数量 = 0
+        for key in list(TrucyLocalBrain._模型缓存.keys()):
+            if key[:2] == 文件对:
+                llm = TrucyLocalBrain._模型缓存.pop(key, None)
+                数量 += 1
+                try:
+                    llm.close()
+                except Exception:
+                    pass
+                try:
+                    del llm
+                except Exception:
+                    pass
+        if 数量:
+            try:
+                import gc
+                gc.collect()
+            except Exception:
+                pass
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        return 数量
 
     @classmethod
     def 卸载全部(cls):

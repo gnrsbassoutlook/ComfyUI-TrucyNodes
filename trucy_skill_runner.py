@@ -33,10 +33,14 @@ try:
     from .trucy_media import (
         图片槽输入, 音频槽输入, 收集图片, 收集音频,
         构建素材清单, 构建媒体部分, 已连接音频, 解析标签家族, 标签逻辑选项,
+        通用标签模式,
         视频槽输入, 解析视频源, 视频信息, 视频数据URI, 视频帧条目, ffmpeg可用,
         _输入被静音 as 输入被静音,
+        _张量可用 as _张量可用,
+        _视频可用 as _视频可用,
     )
     from .trucy_presets import 保存预设, 取预设, 预设选项
+    from .trucy_llm import KV缓存类型选项, FlashAttention模式选项
 except ImportError:
     import os as _os
 
@@ -44,6 +48,7 @@ except ImportError:
     if _here not in sys.path:
         sys.path.insert(0, _here)
     from trucy_llm import TrucyBrain, TrucyBrainError, TrucyLocalBrain, 扫描gguf文件  # noqa: E402
+    from trucy_llm import KV缓存类型选项, FlashAttention模式选项  # noqa: E402
     from trucy_quality import (  # noqa: E402
         检查H3, 检查QWI, 检查通用, 修复H3, 修复QWI, 汇总, 提取引号文字,
     )
@@ -53,8 +58,11 @@ except ImportError:
     from trucy_media import (  # noqa: E402
         图片槽输入, 音频槽输入, 收集图片, 收集音频,
         构建素材清单, 构建媒体部分, 已连接音频, 解析标签家族, 标签逻辑选项,
+        通用标签模式,
         视频槽输入, 解析视频源, 视频信息, 视频数据URI, 视频帧条目, ffmpeg可用,
         _输入被静音 as 输入被静音,
+        _张量可用 as _张量可用,
+        _视频可用 as _视频可用,
     )
     from trucy_presets import 保存预设, 取预设, 预设选项  # noqa: E402
 
@@ -101,22 +109,28 @@ def _日志(msg):
     print(f"\033[36m[TrucyLLM]\033[0m {msg}")
 
 
-def _清洗输出(text):
-    """清理 LLM 输出里的思考块 / 代码围栏 / 常见废话前缀。"""
+def _清洗输出(text, 保留思考过程=False):
+    """清理 LLM 输出里的思考块 / 代码围栏 / 常见废话前缀。
+
+    保留思考过程=True 时只去首尾空白，思考块（<think>…</think>）原样保留
+    （仅本地 GGUF 思考型模型有内联思考块；远程推理模型的思考在 API 侧
+    单独返回，本开关对它们无效）。
+    """
     if not text:
         return ""
     result = str(text).strip()
 
-    # 1. 思考块
-    result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL | re.IGNORECASE).strip()
-    if "<think>" in result.lower() and "</think>" not in result.lower():
-        result = re.sub(r"<think>.*", "", result, flags=re.DOTALL | re.IGNORECASE).strip()
-    # 1.5 思考型本地模型（如 Qwen3.8）：输出形如「思考过程</think>\n\n正式回答」——
-    #     按最后一个闭合标签切分
-    if "</think>" in result:
-        tail = result.rsplit("</think>", 1)[-1].strip()
-        if tail:
-            result = tail
+    if not 保留思考过程:
+        # 1. 思考块
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL | re.IGNORECASE).strip()
+        if "<think>" in result.lower() and "</think>" not in result.lower():
+            result = re.sub(r"<think>.*", "", result, flags=re.DOTALL | re.IGNORECASE).strip()
+        # 1.5 思考型本地模型（如 Qwen3.8）：输出形如「思考过程</think>\n\n正式回答」——
+        #     按最后一个闭合标签切分
+        if "</think>" in result:
+            tail = result.rsplit("</think>", 1)[-1].strip()
+            if tail:
+                result = tail
 
     # 2. markdown 代码围栏
     fence = re.search(r"^```(?:text|json|plaintext|plain|markdown)?\s*\n(.*?)\n```\s*$", result, re.DOTALL)
@@ -140,6 +154,77 @@ def _清洗输出(text):
         result = re.sub(pattern, "", result, flags=re.IGNORECASE)
 
     return result.strip()
+
+
+def _推理后自动卸载(LLM, 开启=False):
+    """执行节点「推理后自动卸载」的落地：仅本地 GGUF 大脑有效。
+
+    为什么不放在 LLM Loader：Loader 在工作流最上游执行，「推理何时结束」
+    只有执行节点知道；且多个执行节点共用一个 Loader 时，只在最后一个
+    执行节点上开，可避免中途卸载导致下一个节点重新加载模型。
+    远程API / 局域网LM Studio 的模型不在本机显存，无需卸载。
+    """
+    if not 开启:
+        return
+    卸载 = getattr(LLM, "卸载", None)
+    if not callable(卸载):
+        _日志("推理后自动卸载: 当前大脑为远程API/局域网LM Studio（模型不在本机显存），无需卸载")
+        return
+    try:
+        数量 = 卸载()
+        if 数量:
+            _日志(f"推理后自动卸载: 本地模型已卸载（{数量} 个实例），显存已释放"
+                  "（下次推理会重新加载模型，略慢）")
+        else:
+            _日志("推理后自动卸载: 没有已加载的本地模型实例")
+    except Exception as e:
+        _日志(f"推理后自动卸载失败（不影响本次输出）: {e}")
+
+
+def _采样微调端口():
+    """执行节点（Chat / Prompt / VLM Runner）共用的采样微调控件。
+
+    铁律：全部默认值 = 「不指定、不发」——老工作流零行为变化。
+    两类字段分开标注（tooltip 说清生效面）：
+      top_p / seed     —— OpenAI 标准请求字段：本地 GGUF 与 远程API/LM Studio 都按请求生效；
+      top_k / 重复惩罚 —— llama.cpp 专有字段：本地 GGUF 与 LM Studio 生效；
+                          严格 OpenAI 兼容 API 无此字段（被拒时自动去掉重试，不打断流水线）；
+      保留思考过程     —— 仅本地 GGUF 思考型模型（保留内联 <think> 块）。
+    远程大脑的等效调优（temperature/top_p 之外的）请在 LM Studio / API 界面设置。
+    """
+    return {
+        "top_p": ("FLOAT", {
+            "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+            "tooltip": "核采样：只从概率前 top_p 的候选里抽，越小越保守。"
+                       "0 = 不指定（用大脑自己的默认）。"
+                       "OpenAI 标准字段，本地GGUF / 远程API / LM Studio 都按请求生效。"
+                       "Qwen3.8 参考：思考模式 0.95、非思考 0.80。",
+        }),
+        "top_k": ("INT", {
+            "default": 0, "min": 0, "max": 200, "step": 1,
+            "tooltip": "每步只保留概率前 k 的候选，治天马行空。0 = 不指定。"
+                       "llama.cpp 专有字段：本地GGUF 与 LM Studio 生效；"
+                       "严格 OpenAI 兼容 API 没有这个字段（设了多被忽略，被拒时自动去掉重试）。"
+                       "Qwen 系参考值 20。",
+        }),
+        "重复惩罚": ("FLOAT", {
+            "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.05,
+            "tooltip": "重复惩罚（llama.cpp repeat_penalty）：>1 抑制复读机，1.0 = 不指定。"
+                       "llama.cpp 专有字段：本地GGUF 与 LM Studio 生效；严格 API 无此字段。",
+        }),
+        "seed": ("INT", {
+            "default": 0, "min": 0, "max": 0xFFFFFFFF, "step": 1,
+            "control_after_generate": True,
+            "tooltip": "随机种子：固定后同样输入结果可复现。0 = 不指定（端点默认随机行为）。"
+                       "OpenAI 标准字段，本地GGUF / 远程API / LM Studio 都按请求生效。",
+        }),
+        "保留思考过程": ("BOOLEAN", {
+            "default": False,
+            "tooltip": "开启 = 输出里保留模型的 <think> 思考块（默认剥掉只留正式回答）。"
+                       "仅本地 GGUF 思考型模型（如 Qwen3.8）生效；"
+                       "远程推理模型的思考由 API 单独返回，本开关无效。",
+        }),
+    }
 
 
 def _自动选择skill(LLM, skills, user_text):
@@ -285,6 +370,26 @@ class TrucyLLMLoader:
                     "default": "medium",
                     "tooltip": "本地模式：思考开启时的推理强度（xhigh 最慢最细 / low 最快）。关闭思考时无效。",
                 }),
+                "KV缓存K类型": (list(KV缓存类型选项), {
+                    "default": KV缓存类型选项[0],
+                    "tooltip": "本地模式（llama.cpp 专有，参考 llama-TE）：KV 缓存 K 的量化精度。"
+                               "默认(不指定)=保持 llama.cpp 原生 f16；q8_0 明显省显存，"
+                               "大模型+长上下文下常常还更快。远程API/LM Studio 无此概念"
+                               "（等效调优请在各自界面设置）。",
+                }),
+                "KV缓存V类型": (list(KV缓存类型选项), {
+                    "default": KV缓存类型选项[0],
+                    "tooltip": "本地模式（llama.cpp 专有，参考 llama-TE）：KV 缓存 V 的量化精度。"
+                               "默认(不指定)=保持 llama.cpp 原生 f16；q8_0 明显省显存，"
+                               "大模型+长上下文下常常还更快。远程API/LM Studio 无此概念。",
+                }),
+                "FlashAttention": (list(FlashAttention模式选项), {
+                    "default": FlashAttention模式选项[0],
+                    "tooltip": "本地模式（llama.cpp 专有，参考 llama-TE）：Flash Attention 三态开关。"
+                               "不开启=不碰 llama.cpp 默认行为（老工作流零变化）；"
+                               "开启/关闭=显式覆盖。开了通常更快更省显存，个别环境有兼容问题可关。"
+                               "远程API/LM Studio 无此概念。",
+                }),
             },
         }
 
@@ -298,6 +403,8 @@ class TrucyLLMLoader:
             model="gemma-4-e4b-it", 请求超时秒=300,
             gguf主模型="", mmproj投影="(无)", n_ctx=8192, n_gpu_layers=-1, n_batch=512,
             思考模式="开启", 推理强度="medium",
+            KV缓存K类型=KV缓存类型选项[0], KV缓存V类型=KV缓存类型选项[0],
+            FlashAttention=FlashAttention模式选项[0],
             API预设="（不使用预设）", 保存为预设=""):
         类型 = str(LLM类型)
 
@@ -354,6 +461,8 @@ class TrucyLLMLoader:
                 模型根目录=roots,
                 enable_thinking=(str(思考模式) != "关闭"),
                 reasoning_effort=推理强度,
+                kv缓存k类型=KV缓存K类型, kv缓存v类型=KV缓存V类型,
+                flash_attention=FlashAttention,
             )
             _日志(f"LLM就绪: {brain.describe()}（首次推理时加载模型；"
                   f"本地模式下 api_base 地址栏无效）")
@@ -460,13 +569,20 @@ class TrucyChat:
                            "H3 = <Picture N>/<Audio N>；"
                            "Qwen-Image-2.1 = <imageN>（多图必须用，单图不加标签）。",
             }),
-            "图片": ("IMAGE", {"tooltip": "旧版通用图片端口（批次=多张）。建议改用下方的参考图1-9 槽位端口，编号更精确。"}),
             "参考图最长边": ("INT", {
                 "default": 0, "min": 0, "max": 2048, "step": 64,
                 "tooltip": "发给 LLM 前参考图的缩放边长，0 = 标准 1280。"
                            "小上下文LLM（如 LM Studio 8192）建议 768 或 512，防止视觉 token 挤爆上下文。",
             }),
+            "推理后自动卸载": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "仅本地 GGUF 生效：本次推理完成后自动卸载模型、释放显存"
+                           "（下次推理会重新加载模型，略慢）。多个执行节点共用一个 LLM Loader 时，"
+                           "建议只挂在最后一个执行节点上；也可继续用专用的「卸载模型」节点。"
+                           "远程API / 局域网LM Studio 下本选项无效（模型不在本机）。",
+            }),
         }
+        optional.update(_采样微调端口())
         optional.update(图片槽输入())
         optional.update(音频槽输入())
         return {
@@ -490,14 +606,15 @@ class TrucyChat:
     CATEGORY = "TrucyNodes/Skill Runner"
 
     def run(self, LLM, 系统提示词, 提示词, temperature, max_tokens,
-            skill加载器=None, 图片=None, 输入媒体标签逻辑=标签逻辑选项[0],
-            参考图最长边=0, **kwargs):
+            skill加载器=None, 输入媒体标签逻辑=标签逻辑选项[0],
+            参考图最长边=0, 推理后自动卸载=False,
+            top_p=0.0, top_k=0, 重复惩罚=1.0, seed=0, 保留思考过程=False, **kwargs):
         if 输入被静音(LLM):
             _日志("对话节点: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
                   "取消静音或改接 LLM 后重跑")
             return ("",)
         # 多参考素材收集（空值安全：None/零尺寸/坏槽位/被静音跳过不报错，也不发给 LLM）
-        图片条目 = 收集图片(kwargs, 旧图=图片, 最长边=参考图最长边 or None)
+        图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None)
         视频条目 = []  # 视频参考端口已摘除（99.99% 不用）；媒体层后端保留，加一行即复活
         音频条目 = 收集音频(kwargs)
         skill = _解析skill加载器(skill加载器, LLM, "\n".join(
@@ -534,14 +651,16 @@ class TrucyChat:
               f"输入媒体标签={'QWI(<imageN>)' if 图像标签模式 else 'H3(<Picture N>)'} | "
               f"images={len(图片条目)} audios={len(音频条目)}")
         content, usage = LLM.chat(
-            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+            top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
         )
         _日志(f"对话 ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
-        result = _清洗输出(content)
+        result = _清洗输出(content, 保留思考过程=保留思考过程)
         # 基础质量检查：只记日志，不打断（毫秒级纯 Python）
         问题 = 检查通用(result)
         if 问题:
             _日志(f"质量模块: {汇总(问题)}")
+        _推理后自动卸载(LLM, 推理后自动卸载)
         return (result,)
 
 
@@ -559,12 +678,6 @@ class TrucyVLMRunner:
     @classmethod
     def INPUT_TYPES(cls):
         optional = {
-            "输入媒体标签逻辑": (标签逻辑选项, {
-                "default": 标签逻辑选项[0],
-                "tooltip": "图片模式下参考图标签用哪套规范：自动识别 = 按 H3 兜底（<Picture N>）；"
-                           "H3 = <Picture N>；Qwen-Image-2.1 = <imageN>（多图必须用，单图不加标签）。"
-                           "视频模式不使用本设置（原生视频无逐帧标签；抽帧通道用「视频帧 N」指代）。",
-            }),
             "参考图最长边": ("INT", {
                 "default": 0, "min": 0, "max": 2048, "step": 64,
                 "tooltip": "发给 LLM 前参考图/视频采样帧的缩放边长，0 = 标准 1280。"
@@ -575,7 +688,15 @@ class TrucyVLMRunner:
                 "tooltip": "视频退化通道用：按等距时间点抽这么多帧发给大脑。仅在原生视频不可用"
                            "（远程大脑 / PATH 缺 ffmpeg / 原生发送失败）时生效。帧越多越细节，越占上下文。",
             }),
+            "推理后自动卸载": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "仅本地 GGUF 生效：本次推理完成后自动卸载模型、释放显存"
+                           "（下次推理会重新加载模型，略慢）。多个执行节点共用一个 LLM Loader 时，"
+                           "建议只挂在最后一个执行节点上；也可继续用专用的「卸载模型」节点。"
+                           "远程API / 局域网LM Studio 下本选项无效（模型不在本机）。",
+            }),
         }
+        optional.update(_采样微调端口())
         optional.update(图片槽输入(数量=8))   # 与 llama-TE 的 QwenTE图像推理 对齐：8 个图片输入
         optional.update(视频槽输入())          # 1 个视频输入（与图片槽按「输入模式」互斥）
         return {
@@ -608,56 +729,72 @@ class TrucyVLMRunner:
     CATEGORY = "TrucyNodes/VLM Runner"
 
     def run(self, LLM, 输入模式, 系统提示词, 提示词, temperature, max_tokens,
-            输入媒体标签逻辑=标签逻辑选项[0], 参考图最长边=0, 视频抽帧数=8, **kwargs):
+            参考图最长边=0, 视频抽帧数=8, 推理后自动卸载=False,
+            top_p=0.0, top_k=0, 重复惩罚=1.0, seed=0, 保留思考过程=False, **kwargs):
         if 输入被静音(LLM):
             _日志("VLM Runner: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
                   "取消静音或改接 LLM 后重跑")
             return ("",)
         模式 = str(输入模式)
         视频对象 = kwargs.get("🎬 视频")
-        有视频输入 = 视频对象 is not None and not 输入被静音(视频对象)
-        有图片输入 = any(kwargs.get(f"🖼️ 参考图{i}") is not None for i in range(1, 9))
+        有视频输入 = _视频可用(视频对象)
+        有图片输入 = any(_张量可用(kwargs.get(f"🖼️ 参考图{i}")) for i in range(1, 9))
 
         if 模式 == "视频":
             if 有图片输入:
                 _日志("VLM Runner: 已连接参考图槽位，但当前为视频模式——图片已忽略"
                       "（切到「图片」模式即可分析图片）")
             if not 有视频输入:
+                if 视频对象 is not None:
+                    _日志("VLM Runner: 「🎬 视频」端口接了东西但不可用"
+                          "（空输入/上游被静音/无法识别的视频对象），按未连接处理")
                 raise ValueError(
                     "视频模式：请在「🎬 视频」端口连接 1 个视频（LoadVideo 节点的输出）；"
                     "若想分析图片，请把「输入模式」改回「图片」并连接参考图槽位。")
             return self._跑视频(LLM, 系统提示词, 提示词, temperature, max_tokens,
-                               视频对象, 视频抽帧数)
+                               视频对象, 视频抽帧数, 推理后自动卸载,
+                               top_p, top_k, 重复惩罚, seed, 保留思考过程)
 
         # 图片模式
         if 有视频输入:
             _日志("VLM Runner: 已连接视频端口，但当前为图片模式——视频已忽略"
                   "（切到「视频」模式即可分析视频）")
-        # 多参考素材收集（空值安全：None/零尺寸/坏槽位/被静音跳过不报错，也不发给 LLM）
+        # 多参考素材收集（空值安全：None/零尺寸/坏槽位/被静音跳过不报错，也不发给 LLM；
+        # 编号保留槽位号从 1 起，按 图片1…图片8 通用标签发给模型，不挂靠任何 Skill 家族）
         图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None)
         if not 图片条目:
             raise ValueError(
                 "图片模式：请在「🖼️ 参考图1-8」槽位至少连接 1 张图片；"
                 "若想分析视频，请把「输入模式」改为「视频」并连接「🎬 视频」端口。")
         return self._跑图片(LLM, 系统提示词, 提示词, temperature, max_tokens,
-                           图片条目, 输入媒体标签逻辑)
+                           图片条目, 推理后自动卸载,
+                           top_p, top_k, 重复惩罚, seed, 保留思考过程)
 
     # ---- 图片模式 ----
-    def _跑图片(self, LLM, 系统提示词, 提示词, temperature, max_tokens, 图片条目, 标签逻辑):
-        图像标签模式 = 解析标签家族(标签逻辑, None, 有素材=True)
-        messages, 媒体部分 = self._组装(系统提示词, 提示词, 图片条目, [], 图像标签模式)
-        _日志(f"VLM Runner → {LLM.describe()} | 模式=图片 | "
-              f"输入媒体标签={'QWI(<imageN>)' if 图像标签模式 else 'H3(<Picture N>)'} | "
+    def _跑图片(self, LLM, 系统提示词, 提示词, temperature, max_tokens, 图片条目,
+                推理后自动卸载=False, top_p=0.0, top_k=0, 重复惩罚=1.0, seed=0,
+                保留思考过程=False):
+        messages, 媒体部分 = self._组装(系统提示词, 提示词, 图片条目, [], 通用标签模式)
+        _日志(f"VLM Runner → {LLM.describe()} | 模式=图片 | 通用标签(图片1-图片{len(图片条目)}) | "
               f"images={len(图片条目)}")
         content, usage = LLM.chat(
-            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+            top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
         )
-        return self._收尾(content, usage)
+        return self._收尾(LLM, content, usage, 保留思考过程, 推理后自动卸载)
 
     # ---- 视频模式 ----
     def _跑视频(self, LLM, 系统提示词, 提示词, temperature, max_tokens,
-               视频对象, 抽帧数):
-        路径, 需清理 = 解析视频源(视频对象, "视频")
+               视频对象, 抽帧数, 推理后自动卸载=False, top_p=0.0, top_k=0,
+               重复惩罚=1.0, seed=0, 保留思考过程=False):
+        try:
+            路径, 需清理 = 解析视频源(视频对象, "视频")
+        except Exception as e:
+            # 空值不崩：连了却不可用的视频按「未连接」走设计内报错，不把原始异常抛上流水线
+            _日志(f"VLM Runner: 视频源解析失败（{e}），按未连接处理")
+            raise ValueError(
+                "视频模式：「🎬 视频」端口连接的视频无法读取（文件不存在/已移动/不是有效视频）。"
+                "请重新连接 LoadVideo 的输出；若想分析图片，请把「输入模式」改回「图片」。")
         try:
             信息 = 视频信息(路径) or {}
             原生 = False
@@ -672,34 +809,47 @@ class TrucyVLMRunner:
                 _日志("VLM Runner: 远程大脑不走原生视频通道（兼容性优先）——本次自动抽帧发送")
             if 原生:
                 视频条目 = [{"kind": "视频", "slot": 1, "n": 1, "label": "视频",
-                           "原生": True, "url": url, "path": 路径,
-                           "duration": 信息.get("duration", 0.0),
-                           "fps": 信息.get("fps", 0.0),
-                           "width": 信息.get("width", 0), "height": 信息.get("height", 0),
-                           "frames": []}]
+                          "原生": True, "url": url, "path": 路径,
+                          "duration": 信息.get("duration", 0.0),
+                          "fps": 信息.get("fps", 0.0),
+                          "width": 信息.get("width", 0), "height": 信息.get("height", 0),
+                          "frames": []}]
             else:
-                视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
-            messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, False)
+                try:
+                    视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
+                except Exception as e:
+                    _日志(f"VLM Runner: 视频抽帧失败（{e}）")
+                    raise ValueError(
+                        "视频模式：无法从连接的视频中抽取帧（文件损坏/编码不支持/OpenCV 读取失败）。"
+                        "请更换视频文件，或把「输入模式」改回「图片」分析图片。")
+            messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, 通用标签模式)
             _日志(f"VLM Runner → {LLM.describe()} | 模式=视频 | "
                   f"{'原生视频文件' if 原生 else '抽帧×%d' % len(视频条目[0]['frames'])} | "
                   f"{信息.get('width', 0)}x{信息.get('height', 0)}，"
                   f"约{信息.get('duration', 0.0):.1f}秒")
             try:
                 content, usage = LLM.chat(
-                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+                    top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
                 )
             except Exception as e:
                 if not 原生:
                     raise
                 _日志(f"VLM Runner: 原生视频发送失败（{e}），自动改为抽帧重试")
-                视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
-                messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, False)
+                try:
+                    视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
+                except Exception as e2:
+                    raise ValueError(
+                        f"视频模式：原生发送失败（{e}），抽帧兜底也失败（{e2}）。"
+                        "请更换视频文件，或把「输入模式」改回「图片」。")
+                messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, 通用标签模式)
                 _日志(f"VLM Runner → {LLM.describe()} | 模式=视频 | "
                       f"抽帧×{len(视频条目[0]['frames'])}（重试）")
                 content, usage = LLM.chat(
-                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+                    top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
                 )
-            return self._收尾(content, usage)
+            return self._收尾(LLM, content, usage, 保留思考过程, 推理后自动卸载)
         finally:
             if 需清理:
                 from pathlib import Path
@@ -707,7 +857,7 @@ class TrucyVLMRunner:
                 Path(路径).unlink(missing_ok=True)
 
     # ---- 公共组装 / 收尾 ----
-    def _组装(self, 系统提示词, 提示词, 图片条目, 视频条目, 图像标签模式):
+    def _组装(self, 系统提示词, 提示词, 图片条目, 视频条目, 标签模式):
         messages = []
         system_text = (系统提示词 or "").strip()
         if system_text:
@@ -716,18 +866,19 @@ class TrucyVLMRunner:
         if not user_text:
             user_text = "请分析提供的输入。"
         if 图片条目 or 视频条目:
-            user_text += "\n\n" + 构建素材清单(图片条目, 视频条目, [], 图像标签模式)
+            user_text += "\n\n" + 构建素材清单(图片条目, 视频条目, [], 标签模式)
         messages.append({"role": "user", "content": user_text})
-        媒体部分 = 构建媒体部分(图片条目, 视频条目, [], 图像标签模式)
+        媒体部分 = 构建媒体部分(图片条目, 视频条目, [], 标签模式)
         return messages, 媒体部分
 
-    def _收尾(self, content, usage):
+    def _收尾(self, LLM, content, usage, 保留思考过程=False, 推理后自动卸载=False):
         _日志(f"VLM Runner ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
-        result = _清洗输出(content)
+        result = _清洗输出(content, 保留思考过程=保留思考过程)
         # 基础质量检查：只记日志，不打断（毫秒级纯 Python）
         问题 = 检查通用(result)
         if 问题:
             _日志(f"质量模块: {汇总(问题)}")
+        _推理后自动卸载(LLM, 推理后自动卸载)
         return (result,)
 
 
@@ -764,6 +915,13 @@ class TrucyPromptH3QWI:
                 "tooltip": "发给 LLM 前参考图的缩放边长，0 = 标准 1280。"
                            "小上下文LLM（如 LM Studio 8192）建议 768 或 512，防止视觉 token 挤爆上下文。",
             }),
+            "推理后自动卸载": ("BOOLEAN", {
+                "default": False,
+                "tooltip": "仅本地 GGUF 生效：本次推理（含可选的一次自动纠正）完成后自动卸载模型、"
+                           "释放显存（下次推理会重新加载模型，略慢）。多个执行节点共用一个 LLM Loader 时，"
+                           "建议只挂在最后一个执行节点上；也可继续用专用的「卸载模型」节点。"
+                           "远程API / 局域网LM Studio 下本选项无效（模型不在本机）。",
+            }),
             "上游约束生效": ("BOOLEAN", {
                 "default": False,
                 "tooltip": "总闸（仅 H3 视频模式）：关闭时，「指定时长」「强制单镜」等外接输入一律无效，"
@@ -786,7 +944,6 @@ class TrucyPromptH3QWI:
                            "纵向构图/慎用大全景；横屏：可用全景与双人并置）；「不指定」=不注入，保持官方原版行为。"
                            "节点自身控件，不受总闸管。",
             }),
-            "图片": ("IMAGE", {"tooltip": "旧版通用图片端口（批次=多张）。建议改用下方的参考图1-9 槽位端口，编号更精确。"}),
             "quality_mode": (质量模式选项, {
                 "default": 质量模式选项[0],
                 "tooltip": "检查并记录：输出后跑纯 Python 检查，有问题只记日志，输出照常流向下游（零打断）；"
@@ -814,6 +971,7 @@ class TrucyPromptH3QWI:
         # 视频参考端口已按用户决定摘除（99.99% 不用），只保留图片与音频
         optional.update(图片槽输入())
         optional.update(音频槽输入())
+        optional.update(_采样微调端口())
         return {
             "required": {
                 "LLM": ("TRUCY_BRAIN",),
@@ -849,10 +1007,11 @@ class TrucyPromptH3QWI:
     CATEGORY = "TrucyNodes/Skill Runner"
 
     def run(self, LLM, skill_preset, task_type, scene_direction, duration, output_language,
-            temperature, max_tokens, skill加载器=None, vision_context="", 图片=None, aspect_ratio="",
+            temperature, max_tokens, skill加载器=None, vision_context="", aspect_ratio="",
             quality_mode="检查并记录（推荐）", shot_count="Auto", constraints="",
             reference_context="", max_chars=0, 上游约束生效=False, 指定时长=0.0,
-            强制单镜=False, 画面比例="不指定", 参考图最长边=0, **kwargs):
+            强制单镜=False, 画面比例="不指定", 参考图最长边=0, 推理后自动卸载=False,
+            top_p=0.0, top_k=0, 重复惩罚=1.0, seed=0, 保留思考过程=False, **kwargs):
         if 输入被静音(LLM):
             _日志("提示词节点: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
                   "取消静音或改接 LLM 后重跑")
@@ -891,7 +1050,7 @@ class TrucyPromptH3QWI:
 
         # 多参考素材收集（空值安全：None/零尺寸/坏槽位跳过不报错，也不发给 LLM；
         # 编号保留槽位号从 1 起，与下游多参 text encoder 一一对应，不重编号）
-        图片条目 = 收集图片(kwargs, 旧图=图片, 最长边=参考图最长边 or None)
+        图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None)
         视频条目 = []  # 视频参考端口已摘除（99.99% 不用）；媒体层后端保留，加一行即复活
         if 图像模式:
             音频条目 = []
@@ -1074,9 +1233,10 @@ class TrucyPromptH3QWI:
               f" | skill={skill['id']} | task={任务} | images={len(图片条目)}"
               f" audios={len(音频条目)}")
         content, usage = LLM.chat(
-            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+            top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
         )
-        prompt = _清洗输出(content)
+        prompt = _清洗输出(content, 保留思考过程=保留思考过程)
         _日志(f"提示词节点 ← {len(prompt)} chars | tokens={usage.get('total_tokens', '?')}")
         if not prompt:
             raise TrucyBrainError(
@@ -1117,9 +1277,10 @@ class TrucyPromptH3QWI:
                 ]
                 try:
                     content2, _ = LLM.chat(
-                        correction, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+                        correction, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分,
+                        top_p=top_p, top_k=top_k, repeat_penalty=重复惩罚, seed=seed,
                     )
-                    prompt2 = _清洗输出(content2)
+                    prompt2 = _清洗输出(content2, 保留思考过程=保留思考过程)
                     if 图像模式:
                         问题2 = 检查QWI(prompt2, aspect_ratio=str(aspect_ratio or "").strip(),
                                      is_edit=(任务 == "Edit" or (任务 == "Auto" and bool(图片条目))),
@@ -1141,6 +1302,7 @@ class TrucyPromptH3QWI:
                 except Exception as e:
                     _日志(f"质量模块: 纠正请求失败（{e}），保留第一稿")
 
+        _推理后自动卸载(LLM, 推理后自动卸载)
         return (prompt,)
 
 

@@ -97,6 +97,40 @@ def _输入被静音(t):
     return t is not None and type(t).__name__ == "ExecutionBlocker"
 
 
+def _视频可用(视频对象):
+    """视频输入端口空值判定（VLM Runner 的「🎬 视频」槽专用）。
+
+    None / 空串 / ExecutionBlocker / 既不能取流也不能保存的对象（垃圾输入）
+    一律算空值——按「空值不崩」铁律跳过并记日志，绝不把异常抛到流水线上。
+    真正连了视频（ComfyUI VIDEO / 路径 / BytesIO）才放行。
+    """
+    if 视频对象 is None:
+        return False
+    if _输入被静音(视频对象):
+        return False
+    import io
+
+    if isinstance(视频对象, io.BytesIO):
+        try:
+            位置 = 视频对象.tell()
+            视频对象.seek(0, io.SEEK_END)
+            大小 = 视频对象.tell()
+            视频对象.seek(位置)
+        except Exception:
+            return False
+        return 大小 > 0
+    if isinstance(视频对象, str):
+        return bool(视频对象.strip())
+    if isinstance(视频对象, os.PathLike):
+        return bool(str(视频对象).strip())
+    if isinstance(视频对象, dict):
+        return any(str(视频对象.get(k) or "").strip()
+                   for k in ("file_path", "path", "filename"))
+    # ComfyUI VIDEO：能取流或能落盘二者有一即可用
+    return (callable(getattr(视频对象, "get_stream_source", None))
+            or callable(getattr(视频对象, "save_to", None)))
+
+
 def _张量可用(t):
     """None / 空串 / 零尺寸 / 空批次 / ExecutionBlocker 都算空值。
 
@@ -234,7 +268,8 @@ def 收集图片(kwargs, 旧图=None, 最长边=None, 日志=_日志):
         t = kwargs.get(f"🖼️ 参考图{slot}")
         if not _张量可用(t):
             if t is not None:
-                日志(f"参考图{slot}: 输入为空/零尺寸，已跳过（不发给大脑）")
+                原因 = "上游节点被静音" if _输入被静音(t) else "输入为空/零尺寸"
+                日志(f"参考图{slot}: {原因}，已跳过（不发给大脑）")
             continue
         try:
             uris = _张量转data_uri列表(t, 最长边)
@@ -609,6 +644,28 @@ QWI标签家族 = (
     "H3（<Picture N>/<Video N>/<Audio N>）",
     "Qwen-Image-2.1（<imageN>）",
 )
+# VLM Runner 专用：通用标签（图片1/视频1/音频1）——不挂靠任何 Skill 家族，
+# 模型按「图片N 分别描述什么」的口径即可理解，H3/QWI 规范与本节点无关。
+通用标签模式 = "通用"
+
+
+def _归一化标签模式(图像模式):
+    """把历史 bool 形态（True=QWI / False=H3）与新模式字符串统一成三态字符串。
+
+    返回 "QWI" / "H3" / "通用"；无法识别时兜底 H3（Chat/Prompt 的祖传行为）。
+    """
+    if 图像模式 is True:
+        return "QWI"
+    if 图像模式 is False or 图像模式 is None:
+        return "H3"
+    if isinstance(图像模式, int) and not isinstance(图像模式, bool):
+        return "QWI" if 图像模式 else "H3"
+    模式 = str(图像模式).strip()
+    if 模式 in ("QWI", "Qwen", "Qwen-Image-2.1", "qwen-image"):
+        return "QWI"
+    if 模式 == 通用标签模式:
+        return 通用标签模式
+    return "H3"
 
 
 def 解析标签家族(标签逻辑="", skill=None, 有素材=True, 日志=_日志):
@@ -639,17 +696,25 @@ def 解析标签家族(标签逻辑="", skill=None, 有素材=True, 日志=_日�
     return False
 
 
-def _标签(kind, n, 图像模式):
-    """图像模式（QWI 家族）→ <imageN>；否则（H3 家族）→ <Picture N> / <Video N> / <Audio N>。"""
-    if 图像模式:
+def _标签(kind, n, 模式):
+    """三态标签：QWI → <imageN>；通用 → 图片N/视频N/音频N（VLM Runner 用）；
+    否则（H3 家族）→ <Picture N> / <Video N> / <Audio N>。"""
+    模式 = _归一化标签模式(模式)
+    if 模式 == "QWI":
         return f"<image{n}>"
+    if 模式 == 通用标签模式:
+        return f"{kind}{n}"
     return f"<{_H3类目[kind]} {n}>"
 
 
 def 构建素材清单(图片, 视频, 音频, 图像模式):
-    """写给模型看的素材清单（编号=槽位号，空槽位不存在，禁止引用）。"""
+    """写给模型看的素材清单（编号=槽位号，空槽位不存在，禁止引用）。
+
+    图像模式接受祖传 bool（True=QWI/False=H3）或三态字符串（多一个「通用」）。
+    """
+    模式 = _归一化标签模式(图像模式)
     lines = []
-    if 图像模式:
+    if 模式 == "QWI":
         n = len(图片)
         lines.append("【本次调用参考图片】（编号即输入槽位号，与下游多参 text encoder 一一对应；"
                      "未接入的槽位不存在，禁止引用不存在的编号）")
@@ -664,46 +729,112 @@ def 构建素材清单(图片, 视频, 音频, 图像模式):
                 f"{_标签('图片', e['n'], True)}={e['label']}（{e['尺寸'][0]}x{e['尺寸'][1]}，已附图）"
                 for e in 图片)
             lines.append(f"共 {n} 张：{desc}。多图必须使用 <imageN> 标记指代，各图属性解耦。")
-    else:
-        lines.append("【本次调用参考素材】（编号即输入槽位号，与下游多参 text encoder 一一对应；"
-                     "未接入的槽位不存在，禁止在提示词中引用不存在的编号）")
-        if 图片:
-            desc = "；".join(
-                f"{_标签('图片', e['n'], False)}={e['label']}（{e['尺寸'][0]}x{e['尺寸'][1]}，已附图）"
-                for e in 图片)
-            lines.append(f"图片（上限{图片槽上限}）：{desc}")
+        return "\n".join(lines)
+    if 模式 == 通用标签模式:
+        # VLM Runner 口径：图片1…图片N 分别描述，视频1 整体描述——不挂靠任何 Skill 家族
+        n = len(图片)
+        lines.append("【本次调用参考图片】（按接入顺序编号为 图片1…图片N；"
+                     "请分别描述每张图片的内容，不要混为一谈）")
+        if n == 0:
+            lines.append("本次未接入参考图片。")
+        elif n == 1:
+            e = 图片[0]
+            lines.append(f"共 1 张：图片{e['n']}={e['label']}"
+                         f"（{e['尺寸'][0]}x{e['尺寸'][1]}，已附图）。")
         else:
-            lines.append(f"图片（上限{图片槽上限}）：无")
+            desc = "；".join(
+                f"图片{e['n']}={e['label']}（{e['尺寸'][0]}x{e['尺寸'][1]}，已附图）"
+                for e in 图片)
+            lines.append(f"共 {n} 张：{desc}。")
         if 视频:
             desc = "；".join(
-                f"{_标签('视频', v['n'], False)}={v['label']}"
-                f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，{v['width']}x{v['height']}，已附完整视频文件）"
+                f"视频{v['n']}={v['label']}"
+                f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，{v['width']}x{v['height']}，"
+                f"已附完整视频文件）"
                 if v.get("原生") else
-                f"{_标签('视频', v['n'], False)}={v['label']}"
-                f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，已附{len(v['frames'])}张采样帧）"
+                f"视频{v['n']}={v['label']}"
+                f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，"
+                f"已附{len(v['frames'])}张等距采样帧，帧按时间顺序排列）"
                 for v in 视频)
-            lines.append(f"视频（上限{视频槽上限}）：{desc}")
-        else:
-            lines.append(f"视频（上限{视频槽上限}）：无")
+            lines.append(f"视频（上限{视频槽上限}）：{desc}。请结合画面与时间线整体描述视频内容。")
         if 音频:
             desc = "；".join(
-                f"{_标签('音频', a['n'], False)}={a['label']}"
+                f"音频{a['n']}={a['label']}"
                 f"（{a['duration']:.2f}秒，{a['sample_rate']}Hz，已附频谱图）"
                 for a in 音频)
-            lines.append(f"音频（上限{音频槽上限}）：{desc}")
-        else:
-            lines.append(f"音频（上限{音频槽上限}）：无")
+            lines.append(f"音频（上限{音频槽上限}）：{desc}。")
+        return "\n".join(lines)
+    lines.append("【本次调用参考素材】（编号即输入槽位号，与下游多参 text encoder 一一对应；"
+                 "未接入的槽位不存在，禁止在提示词中引用不存在的编号）")
+    if 图片:
+        desc = "；".join(
+            f"{_标签('图片', e['n'], False)}={e['label']}（{e['尺寸'][0]}x{e['尺寸'][1]}，已附图）"
+            for e in 图片)
+        lines.append(f"图片（上限{图片槽上限}）：{desc}")
+    else:
+        lines.append(f"图片（上限{图片槽上限}）：无")
+    if 视频:
+        desc = "；".join(
+            f"{_标签('视频', v['n'], False)}={v['label']}"
+            f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，{v['width']}x{v['height']}，已附完整视频文件）"
+            if v.get("原生") else
+            f"{_标签('视频', v['n'], False)}={v['label']}"
+            f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，已附{len(v['frames'])}张采样帧）"
+            for v in 视频)
+        lines.append(f"视频（上限{视频槽上限}）：{desc}")
+    else:
+        lines.append(f"视频（上限{视频槽上限}）：无")
+    if 音频:
+        desc = "；".join(
+            f"{_标签('音频', a['n'], False)}={a['label']}"
+            f"（{a['duration']:.2f}秒，{a['sample_rate']}Hz，已附频谱图）"
+            for a in 音频)
+        lines.append(f"音频（上限{音频槽上限}）：{desc}")
+    else:
+        lines.append(f"音频（上限{音频槽上限}）：无")
     return "\n".join(lines)
 
 
 def 构建媒体部分(图片, 视频, 音频, 图像模式):
-    """组装 OpenAI 多模态 content parts（文字标签 + 图片）。空素材不会出现在这里。"""
+    """组装 OpenAI 多模态 content parts（文字标签 + 图片）。空素材不会出现在这里。
+
+    图像模式接受祖传 bool 或三态字符串（QWI / H3 / 通用）。
+    """
+    模式 = _归一化标签模式(图像模式)
     parts = []
-    if 图像模式:
+    if 模式 == "QWI":
         for e in 图片:
             parts.append({"type": "text",
                           "text": f"Source {_标签('图片', e['n'], True)} ({e['label']}) follows."})
             parts.append({"type": "image_url", "image_url": {"url": e["uri"]}})
+        return parts
+    if 模式 == 通用标签模式:
+        # VLM Runner：图片1…图片N 分别描述；视频1 整体描述
+        for e in 图片:
+            parts.append({"type": "text",
+                          "text": f"Source 图片{e['n']} ({e['label']}) follows."})
+            parts.append({"type": "image_url", "image_url": {"url": e["uri"]}})
+        for v in 视频:
+            if v.get("原生"):
+                parts.append({"type": "text", "text": (
+                    f"以下是一段视频文件（视频{v['n']}，时长约 {v['duration']:.1f} 秒，"
+                    f"{v['width']}x{v['height']}）。请结合画面与时间线整体描述视频内容。")})
+                # 部件形状必须用 {"type":"video","video":url}——Qwen3.8 GGUF 内置模板
+                # 的视频分支只认 'video' in item，发 OpenAI 的 video_url 形状会被拒。
+                parts.append({"type": "video", "video": v["url"]})
+                continue
+            for f in v["frames"]:
+                parts.append({"type": "text", "text": (
+                    f"Analysis artifact for 视频{v['n']}: sampled frame at "
+                    f"{f['time']:.3f}s. This is not one of the 图片N reference images; "
+                    f"it is a frame sampled from 视频{v['n']}.")})
+                parts.append({"type": "image_url", "image_url": {"url": f["uri"]}})
+        for a in 音频:
+            parts.append({"type": "text", "text": (
+                f"Analysis artifact for 音频{a['n']}: time-frequency spectrogram. "
+                "Use it only for timing, rhythm, energy, silence and dynamics; "
+                "it is not a source picture.")})
+            parts.append({"type": "image_url", "image_url": {"url": a["spectrogram_uri"]}})
         return parts
     for e in 图片:
         parts.append({"type": "text",
