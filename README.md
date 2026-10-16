@@ -10,8 +10,10 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
-### [2026-10-16] The "Brain & Reference" Update: LLM Skill Runner + MiniMax H3 ref2v
-🧠 **Skill Runner Trucy** (merged from ComfyUI-TrucyLLM): a skill-executor node family — LLM (LAN LM Studio / remote API / local GGUF) → Skill Loader → Chat / Prompt (H3·QWI) → Unload Model. The brain output port is named **LLM**. Includes the API preset address book and the zero-interruption quality layer.
+### [2026-10-16] The "Brain & Reference" Update: LLM Loader + Skill Runner + VLM Runner + MiniMax H3 ref2v
+🧠 **LLM Loader Trucy** (merged from ComfyUI-TrucyLLM): the brain loader — one node, three brain types (LAN LM Studio / remote API / local GGUF). It only loads a brain and never runs a skill; its **LLM** output port feeds both the **Skill Runner Trucy** family and the **VLM Runner Trucy** node.
+🛠️ **Skill Runner Trucy**: the real skill executors — Skill Loader → Chat / Prompt (H3·QWI) → Unload Model, plus the API preset address book and the zero-interruption quality layer.
+👁️ **VLM Runner Trucy**: image + video reasoning with no skill machinery — **8 image slots or 1 video, mutually exclusive**. Local GGUF brains receive the **video file itself** (Qwen-VL reads video natively via llama.cpp mtmd + ffmpeg, with timestamps); remote brains / missing ffmpeg / failed native send automatically degrade to evenly-sampled frames. No text mode by design — that's the Chat node's job.
 🎬 **ref2v Trucy**: MiniMax H3 Ref2VA reference encoding in two interchangeable forms — the cache-layer dual nodes (no prompt input on the reference encoder, so ComfyUI's built-in cache skips VAE re-encoding when only the prompt changes) and a merged single-frame node with internal LRU caching.
 🧹 Cleanup: removed the long-dead legacy Klein encode nodes and the two obsolete H3 prep/prompt nodes; every remaining node is listed in this README.
 
@@ -33,7 +35,7 @@ Smart Blockers: Features built-in disable_out boolean toggles powered by ComfyUI
 
 ## 🚀 Core Modules
 
-**49 nodes in total.** Categories in the ComfyUI menu: `TrucyNodes/Logic`, `/Image`, `/Toolkit`, `/Text`, `/Excel`, `/Audio`, `/Video`, `/Skill Runner`, `/ref2v`.
+**50 nodes in total.** Categories in the ComfyUI menu: `TrucyNodes/Logic`, `/Image`, `/Toolkit`, `/Text`, `/Excel`, `/Audio`, `/Video`, `/LLM Loader`, `/Skill Runner`, `/VLM Runner`, `/ref2v`.
 
 ### 1. Logic & Flow Control
 *   **Trucy For Loop (Start / End, 9ch / 2ch)**: High-performance recursive loop system.
@@ -78,33 +80,41 @@ Smart Blockers: Features built-in disable_out boolean toggles powered by ComfyUI
 *   **TrucyVideoLoaderIndex**: Professional proxy video pipeline — FPS frame skipping (4/8/12), resolution proxying, and out-of-bounds protection.
 *   **TrucyVideoCombine**: Direct FFmpeg pipe encoding (lives in the VHS category). Zero intermediate files. H.264 MP4 / WebP / GIF with audio muxing.
 
-### 6. Skill Runner Trucy (LLM + Skills)
-A **skill executor** that turns any OpenAI-compatible brain into a node-driven prompt factory. The "brain" output port is named **LLM** and feeds the skill nodes.
+### 6. LLM Loader Trucy (brain loader)
+Loads one of three brain types and outputs it on the **LLM** port. It runs no skill by itself — the same brain feeds the **Skill Runner Trucy** family (section 7) and the **VLM Runner Trucy** node (section 8).
 
-*   **🚀 Skill Runner Trucy · LLM**: three brain types in one dropdown —
+*   **🚀 LLM Loader Trucy**: three brain types in one dropdown —
     *   **LAN LM Studio** (`http://<Mac-IP>:1234/v1`, default `gemma-4-e4b-it`)
     *   **Remote API**: DeepSeek / OpenAI / any OpenAI-compatible service (`api_base` + `api_key` + `model`; bare domains like `https://api.deepseek.com` auto-complete to `/v1`). The `model` box is a free-text required field — type any model ID, including relay/aggregator names like `gemini-3.1-flash-lite-preview`; API presets only pre-fill it and never lock it
     *   **Local GGUF**: runs `.gguf` files from `ComfyUI/models/LLM` (subfolders included) on your own GPU, with mmproj vision projector, `n_ctx` / `n_gpu_layers` / `n_batch`, and Qwen3.8-style thinking controls
-*   **🚀 Skill Runner Trucy · Skill Loader**: scans the bundled `skills/` (plus `comfyUI-llama-TE/skills` when present); fix one skill or let the brain auto-pick.
+
+**API preset address book**: the loader node carries an `API Preset` dropdown + `+ Save as API Preset` button (saved to `api_presets.json` in the plugin folder — it contains keys in plaintext, do not share the folder).
+
+### 7. Skill Runner Trucy (skill executors)
+The real skill-executor family: **LLM Loader → Skill Loader → Chat / Prompt → Unload Model**.
+
+*   **🚀 Skill Loader Trucy**: scans the bundled `skills/` (plus `comfyUI-llama-TE/skills` when present); fix one skill or let the brain auto-pick.
 *   **🚀 Skill Runner Trucy · Chat**: brain + skill + prompt → text, with **12 reference slots** (🖼️ images 1-9 / 🎵 audio 1-3). Empty slots are skipped and logged, never crash the pipeline.
 *   **🚀 Skill Runner Trucy · Prompt (H3/QWI)**: two official prompt-skill families in one node — **H3** (MiniMax video prompts, `[Shot N]` storyboards with soundscape/music) and **Qwen-Image-2.1** (image prompt rewriting). Quality layer checks output and logs issues with **zero pipeline interruption** (optional one-shot auto-repair, off by default).
 *   **🚀 Skill Runner Trucy · Unload Model**: frees local GGUF VRAM before sampling; attach its wildcard `upstream` input to the prompt node's output.
 
-**API preset address book**: the LLM node carries an `API Preset` dropdown + `+ Save as API Preset` button (saved to `api_presets.json` in the plugin folder — it contains keys in plaintext, do not share the folder).
+### 8. VLM Runner Trucy (image / video reasoning)
+Pure **system prompt + user prompt + images or video → text** — **no Skill Loader involved** (that's the only difference from the Skill Runner family). Modeled after `comfyUI-llama-TE`'s `QwenTE图像推理` and extended with video input.
 
-### 7. Vision Trucy (image reasoning)
-Pure **system prompt + user prompt + images → text** — **no Skill Loader involved** (that's the only difference from the Skill Runner family). Modeled after `comfyUI-llama-TE`'s `QwenTE图像推理`, with the same **8 image inputs**.
+*   **🚀 VLM Runner Trucy**: LLM (any of the three brain types) + `input mode` (**image / video — mutually exclusive, never both**) + system & user prompts → text:
+    *   **Image mode**: 🖼️ reference images 1-8, tagged `<Picture N>` / `<imageN>` (auto-detected, H3 fallback)
+    *   **Video mode**: 🎬 one video (LoadVideo output). Local GGUF brains receive the **video file itself** — llama.cpp's mtmd decodes it via ffmpeg subprocesses (needs `ffmpeg` + `ffprobe` on PATH; ComfyUI packs usually ship them) and Qwen-VL reads it natively at ~4 fps with timestamps. Remote brains, missing ffmpeg, or a failed native send **automatically degrade to evenly-sampled frames** (`视频抽帧数`, default 8) sent as images — each frame keeps its timestamp, so temporal analysis survives the fallback
+    *   Wiring both sides at once? The mode dropdown decides what goes to the brain; the other side is ignored with a log line
+*   **No text mode by design** — pure-text chat is the Skill Runner's Chat node. A mode with nothing connected fails with a clear message instead of sending an empty prompt.
+*   Reuses the whole media layer: null-safe slots, quality logging without interruption.
+*   **Note**: what actually reaches the model depends on the brain. Local GGUF needs an mmproj projector; DeepSeek's API now accepts images (returns model `deepseek-flash`) — its video mode falls back to sampled frames.
 
-*   **🚀 Vision Trucy · Image Reasoning**: LLM (any of the three brain types) + `input mode` (image / text) + system & user prompts + 🖼️ reference images 1-8 (+ 🎵 audio 1-3) → text. Great for batch image captioning, reference-asset analysis (e.g. feeding character sheets / locations into the H3 ref2v pipeline), or any vision Q&A — straight from a prompt box, zero skill machinery.
-*   Reuses the whole media layer: null-safe slots, `<Picture N>` / `<imageN>` tagging (auto-detected, H3 fallback), quality logging without interruption.
-*   **Note**: whether images actually reach the model depends on the brain. Local GGUF needs an mmproj projector; DeepSeek's API now accepts images (returns model `deepseek-flash`); text-only models will error on image mode — switch the mode to text.
-
-### 8. H3 ref2v Trucy (MiniMax H3 Ref2VA)
+### 9. H3 ref2v Trucy (MiniMax H3 Ref2VA)
 Reference-to-video conditioning for the official MiniMax H3 pipeline, in two interchangeable forms (identical reference-encoding math, verified by unit tests):
 
-*   **🚀 ref2v Trucy · Reference Encode (cache layer)**: reference images/audio + dual VAE → AV latent + ref_data. **Deliberately has no prompt input** — change the prompt and ComfyUI's built-in node cache skips VAE re-encoding entirely.
-*   **🚀 ref2v Trucy · Prompt Encode (exit)**: clip + prompt + upstream ref_data → positive conditioning (only this node re-runs when the prompt changes).
-*   **🚀 ref2v Trucy · Reference to Video (merged)**: single-frame version with the same wiring as the official `MiniMaxH3ReferenceToVideo` node; because it contains the prompt, it manages an internal LRU cache (content-level sha1 per slot + VAE instance identity + weak-ref liveness).
+*   **🚀 H3 ref2v Trucy · Reference Encode (cache layer)**: reference images/audio + dual VAE → AV latent + ref_data. **Deliberately has no prompt input** — change the prompt and ComfyUI's built-in node cache skips VAE re-encoding entirely.
+*   **🚀 H3 ref2v Trucy · Prompt Encode (exit)**: clip + prompt + upstream ref_data → positive conditioning (only this node re-runs when the prompt changes).
+*   **🚀 H3 ref2v Trucy · Reference to Video (merged)**: single-frame version with the same wiring as the official `MiniMaxH3ReferenceToVideo` node; because it contains the prompt, it manages an internal LRU cache (content-level sha1 per slot + VAE instance identity + weak-ref liveness).
 
 Both forms reuse the official helpers (`_resize` / `_encode_ref_audio` / `_empty_av_latent`), follow the official `<Picture N>` / `<Audio N>` tag scheme (slot numbers are 1-based here vs `ref_image_0` officially — purely a kwargs key name, results are identical), and are null-safe end to end. Video reference ports were removed by decision (use the official `MiniMaxH3ReferenceToVideo` node if ever needed; the collection backend stays dormant in `trucy_media.py`).
 

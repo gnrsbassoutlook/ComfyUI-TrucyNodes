@@ -1,5 +1,5 @@
 /**
- * TrucyLLM 大脑节点 · API 预设地址簿前端
+ * LLM Loader Trucy 大脑节点 · API 预设地址簿前端
  *
  *  - 「＋ 保存为API预设」按钮：把当前远程字段（地址/密钥/模型/超时）POST 到
  *    插件目录 api_presets.json，并即时刷新「API预设」下拉；
@@ -12,7 +12,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const NODE_TYPE = "TrucyLLM";
+const NODE_TYPE = "TrucyLLMLoader";
 const PRESET_OFF = "（不使用预设）";
 const SAVE_NAME_WIDGET = "保存为预设";
 const PRESET_WIDGET = "API预设";
@@ -104,7 +104,7 @@ async function savePreset(node) {
 }
 
 app.registerExtension({
-    name: "TrucyLLM.BrainPresets",
+    name: "TrucyLLMLoader.BrainPresets",
     async nodeCreated(node) {
         if (node?.comfyClass !== NODE_TYPE) return;
         // 等一帧让 widgets 就绪

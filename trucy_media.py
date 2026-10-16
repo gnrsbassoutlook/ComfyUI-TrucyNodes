@@ -1,4 +1,4 @@
-"""TrucyLLM · 多参考素材输入层（图片1-9 / 音频1-3；视频端口已按用户决定摘除）。
+"""TrucyLLM · 多参考素材输入层（图片1-9 / 音频1-3 / 视频1）。
 
 两条铁律（用户底线，源自批处理连续性要求）：
 1. 编号保留输入槽位号（从 1 起），空槽位不重编号——与下游多参 text encoder 一一对应；
@@ -6,9 +6,11 @@
    转换失败一律跳过并记日志，绝不报错卡流水线；空槽位不进发给 LLM 的 payload。
 
 标签规范按 Skill 家族切换：H3 = <Picture N>/<Audio N>；QWI = <imageN>。
-上送方式：图片 → JPEG data URI（最长边 1280）；音频 → numpy STFT 频谱图。
-收集视频/_分析视频 为休眠后端（端口已摘除，无节点调用，单测仍覆盖；
-复活 = 恢复 视频槽输入() 注册 + 节点里加一行 收集视频(kwargs)）。
+上送方式：图片 → JPEG data URI（最长边 1280）；音频 → numpy STFT 频谱图；
+视频 → 双通道：本地 GGUF 大脑优先发原生视频文件（llama.cpp mtmd 经 ffmpeg 子进程解码，
+Qwen-VL 系直接读视频）；大脑不支持时自动退化为 cv2 等距采样帧。
+视频槽输入() 为 VLM Runner 专用（1 槽，与图片槽按节点「输入模式」互斥）；
+Chat/Prompt 的 🎞️ 参考视频 多槽端口仍处休眠态（收集视频 保留，单测覆盖）。
 不依赖 ComfyUI，可独立单测。
 """
 import os
@@ -49,9 +51,27 @@ def 图片槽输入(数量=None):
     }
 
 
-# 视频参考端口已按用户决定从所有节点摘除（99.99% 不用），端口声明随之删除；
-# 收集视频/_分析视频 保留为休眠后端（无任何节点调用，单测仍覆盖），
-# 复活方式：恢复本函数注册 + 在对话/H3提示词节点里加一行 收集视频(kwargs)。
+# 视频参考端口：Chat/Prompt 的 🎞️ 参考视频1-3 多槽端口仍处休眠态（收集视频 保留，
+# 单测覆盖；复活 = 在对话/H3提示词节点里加一行 收集视频(kwargs)）。
+# 下方 视频槽输入() 是 VLM Runner 专用的单视频输入（按「输入模式」与图片槽互斥）。
+
+
+def 视频槽输入():
+    """视频输入槽（VLM Runner 专用：恰好 1 个视频，接 LoadVideo 的输出）。
+
+    与「🖼️ 参考图」槽互斥——由节点「输入模式」下拉决定发哪边，两边都接时
+    按模式取舍并记日志。发送双通道：
+      本地 GGUF 大脑 → 原生视频文件（llama.cpp mtmd 调 ffmpeg 解码，Qwen-VL 直接读视频）；
+      远程大脑 / 缺 ffmpeg → 自动退化为等距采样帧（cv2）按图片发送。
+    """
+    return {
+        "🎬 视频": ("VIDEO", {
+            "tooltip": "视频输入（接 LoadVideo 节点的输出）。与「🖼️ 参考图」槽互斥："
+                       "输入模式选「视频」时只发视频，选「图片」时忽略本端口。"
+                       "本地GGUF大脑优先原样发送视频文件（Qwen-VL 原生读视频）；"
+                       "远程大脑或不支持时自动改为等距抽帧发送。",
+        })
+    }
 
 
 def 音频槽输入():
@@ -246,7 +266,7 @@ def 收集图片(kwargs, 旧图=None, 最长边=None, 日志=_日志):
 # ---------------------------------------------------------------------------
 # 收集：视频（cv2 采样帧）—— ※ 休眠后端：端口已摘除，无节点调用，单测仍覆盖
 # ---------------------------------------------------------------------------
-def _视频临时路径(video, slot):
+def _视频临时路径(video, slot, 名称="参考视频"):
     """VIDEO 对象 / 路径 / dict → 临时文件路径。返回 (path, 需清理)。"""
     import tempfile
     from pathlib import Path
@@ -255,22 +275,22 @@ def _视频临时路径(video, slot):
         p = str(video).strip()
         if p and Path(p).is_file():
             return p, False
-        raise ValueError(f"参考视频{slot} 路径不存在")
+        raise ValueError(f"{名称} 路径不存在")
     if isinstance(video, dict):
         for key in ("file_path", "path", "filename"):
             v = video.get(key)
             if isinstance(v, str) and Path(v).is_file():
                 return v, False
-        raise ValueError(f"参考视频{slot} 无法解析")
+        raise ValueError(f"{名称} 无法解析")
     if not hasattr(video, "save_to"):
-        raise ValueError(f"参考视频{slot} 不是有效的 ComfyUI VIDEO 输入")
+        raise ValueError(f"{名称} 不是有效的 ComfyUI VIDEO 输入")
     handle = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     handle.close()
     try:
         saved = video.save_to(handle.name)
         ok = saved is not False and Path(handle.name).is_file() and Path(handle.name).stat().st_size > 0
         if not ok:
-            raise ValueError(f"参考视频{slot} 保存失败")
+            raise ValueError(f"{名称} 保存失败")
         return handle.name, True
     except Exception:
         Path(handle.name).unlink(missing_ok=True)
@@ -283,7 +303,7 @@ def _分析视频(video, slot, 采样帧数=视频采样帧数):
     import numpy as np
     from PIL import Image
 
-    path, 临时 = _视频临时路径(video, slot)
+    path, 临时 = 解析视频源(video, f"参考视频{slot}")
     cap = None
     try:
         cap = cv2.VideoCapture(path)
@@ -342,6 +362,122 @@ def 收集视频(kwargs, 采样帧数=视频采样帧数, 日志=_日志):
             continue
         条目.append({"kind": "视频", "slot": slot, "n": slot, "label": f"参考视频{slot}", **info})
     return 条目
+
+
+# ---------------------------------------------------------------------------
+# 视频源解析 / 原生视频通道（VLM Runner 用）
+# ---------------------------------------------------------------------------
+def 解析视频源(视频对象, 名称="视频"):
+    """VIDEO 对象 / 路径 / dict → (本地文件路径, 需清理)。
+
+    优先 VideoFromFile.get_stream_source() 直接取路径（ComfyUI LoadVideo 即此类，
+    零拷贝不落盘）；BytesIO 来源退 save_to 临时文件。调用方负责按 需清理 删临时文件。
+    """
+    import io
+    from pathlib import Path
+
+    if isinstance(视频对象, io.BytesIO):
+        return _字节流存临时文件(视频对象, 名称)
+    getter = getattr(视频对象, "get_stream_source", None)
+    if callable(getter):
+        try:
+            src = getter()
+        except Exception:
+            src = None
+        if isinstance(src, str) and src.strip() and Path(src).is_file():
+            return src, False
+        if isinstance(src, io.BytesIO):
+            return _字节流存临时文件(src, 名称)
+    return _视频临时路径(视频对象, 1, 名称=名称)
+
+
+def _字节流存临时文件(stream, 名称="视频"):
+    """BytesIO → 临时 mp4 路径（VIDEO 来源是内存流时用）。"""
+    import tempfile
+    from pathlib import Path
+
+    try:
+        stream.seek(0)
+    except Exception:
+        pass
+    handle = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    try:
+        handle.write(stream.read())
+        handle.close()
+        if Path(handle.name).stat().st_size <= 0:
+            raise ValueError(f"{名称}: 内存流为空")
+        return handle.name, True
+    except Exception:
+        handle.close()
+        Path(handle.name).unlink(missing_ok=True)
+        raise
+
+
+def ffmpeg可用():
+    """llama.cpp mtmd 的原生视频解码以子进程调 ffmpeg + ffprobe（缺一不可）。
+
+    ComfyUI 整合包通常自带（PATH 上可找到）；找不到时视频自动走抽帧通道，
+    由调用方记日志说明，不影响工作流继续。
+    """
+    import shutil
+
+    return bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
+
+
+def 视频信息(path):
+    """轻量探测（不解码）：时长/帧率/宽高。探测失败返回 None，调用方兜底。"""
+    import cv2
+
+    cap = None
+    try:
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            return None
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+        count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        if fps <= 0 or w <= 0 or h <= 0:
+            return None
+        return {"duration": (count / fps) if count > 0 else 0.0,
+                "fps": fps, "width": w, "height": h}
+    except Exception:
+        return None
+    finally:
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
+
+
+def 视频数据URI(path, 上限字节=20 * 1024 * 1024):
+    """视频文件 → data URI（远程 OpenAI 兼容大脑的 video_url 部件用）。
+
+    超限抛 ValueError——调用方应退化为抽帧发送（大文件内联只会被 API 拒）。
+    """
+    import base64
+    from pathlib import Path
+
+    p = Path(path)
+    size = p.stat().st_size
+    if size > 上限字节:
+        raise ValueError(
+            f"视频文件约 {size // 1024 // 1024}MB，超过内联上限 "
+            f"{上限字节 // 1024 // 1024}MB")
+    后缀 = p.suffix.lower().lstrip(".")
+    mime = f"video/{后缀}" if 后缀 else "video/mp4"
+    return f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode("ascii")
+
+
+def 视频帧条目(视频对象, 采样帧数=视频采样帧数, 名称="视频"):
+    """抽帧条目：cv2 等距采样 → JPEG data URI（原生视频不可用时的退化通道）。
+
+    条目结构与 收集视频 一致（frames 带 time/uri），供 构建素材清单/构建媒体部分 消费。
+    """
+    info = _分析视频(视频对象, 1, 采样帧数)
+    return {"kind": "视频", "slot": 1, "n": 1, "label": 名称,
+            "原生": False, **info}
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +677,9 @@ def 构建素材清单(图片, 视频, 音频, 图像模式):
         if 视频:
             desc = "；".join(
                 f"{_标签('视频', v['n'], False)}={v['label']}"
+                f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，{v['width']}x{v['height']}，已附完整视频文件）"
+                if v.get("原生") else
+                f"{_标签('视频', v['n'], False)}={v['label']}"
                 f"（{v['duration']:.2f}秒，{v['fps']:.2f}fps，已附{len(v['frames'])}张采样帧）"
                 for v in 视频)
             lines.append(f"视频（上限{视频槽上限}）：{desc}")
@@ -571,6 +710,16 @@ def 构建媒体部分(图片, 视频, 音频, 图像模式):
                       "text": f"Source {_标签('图片', e['n'], False)} ({e['label']}) follows."})
         parts.append({"type": "image_url", "image_url": {"url": e["uri"]}})
     for v in 视频:
+        if v.get("原生"):
+            parts.append({"type": "text", "text": (
+                f"以下是一段视频文件（{v['label']}，时长约 {v['duration']:.1f} 秒，"
+                f"{v['width']}x{v['height']}）。请结合画面与时间线整体分析。")})
+            # 部件形状必须用 {"type":"video","video":url} 而非 OpenAI 的 video_url——
+            # Qwen3.8 GGUF 内置模板的视频分支只认 'video' in item / item.type=='video'，
+            # 发 video_url 会被模板 raise「Unexpected item type in content」。
+            # （原生通道只给本地 GGUF 大脑用，远程大脑走抽帧，不受影响）
+            parts.append({"type": "video", "video": v["url"]})
+            continue
         for f in v["frames"]:
             parts.append({"type": "text", "text": (
                 f"Analysis artifact for {_标签('视频', v['n'], False)}: sampled frame at "

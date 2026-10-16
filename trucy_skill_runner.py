@@ -1,13 +1,17 @@
-"""TrucyLLM · Skill Runner 节点族（合并自 ComfyUI-TrucyLLM）。
+"""TrucyNodes · Skill Runner / LLM Loader / VLM Runner 节点族（合并自 ComfyUI-TrucyLLM）。
 
-五个节点：
-    LLM            —— 三种LLM：局域网LM Studio / 远程API（OpenAI 兼容）/ 本地GGUF
-    Skill Loader   —— 扫描 skills 目录，选择或自动匹配 Skill
-    Chat           —— LLM + Skill + 提示词 → 文本（支持参考图/音频输入）
-    Prompt (H3/QWI)—— 官方提示词 Skill（H3 视频 / Qwen-Image-2.1 图像）→ 结构化提示词
-    Unload Model   —— 释放本地 GGUF 占用的显存（放工作流末尾、出图前）
+六个节点，三个类目：
+    LLM Loader      —— 装载三种大脑：局域网LM Studio / 远程API（OpenAI 兼容）/ 本地GGUF。
+                      独立类目 TrucyNodes/LLM Loader；输出端口名仍为 LLM，
+                       可同时喂给 Skill Runner 家族与 VLM Runner（上游只管装载，不管执行）。
+    Skill Loader    —— 扫描 skills 目录，选择或自动匹配 Skill
+    Chat            —— LLM + Skill + 提示词 → 文本（支持参考图/音频输入）
+    Prompt (H3/QWI) —— 官方提示词 Skill（H3 视频 / Qwen-Image-2.1 图像）→ 结构化提示词
+    Unload Model    —— 释放本地 GGUF 占用的显存（放工作流末尾、出图前）
+    VLM Runner      —— LLM + 提示词 + 图片（8 槽）或视频（1 个）→ 文本，不调用 Skill；
+                      图片/视频模式互斥（独立类目 TrucyNodes/VLM Runner）。
 
-LLM 与各执行节点之间的连接端口名为 LLM（输出/输入均为此名）。
+LLM Loader 与各执行节点之间的连接端口名为 LLM（输出/输入均为此名）。
 质量层 trucy_quality：检查只记日志、确定性修复只动格式、LLM 纠正可选且全自动——
 连续性优先，任何手段都不会中断 ComfyUI 批处理流水线。
 传统节点写法（INPUT_TYPES / RETURN_TYPES），方便自行修改。
@@ -29,6 +33,7 @@ try:
     from .trucy_media import (
         图片槽输入, 音频槽输入, 收集图片, 收集音频,
         构建素材清单, 构建媒体部分, 已连接音频, 解析标签家族, 标签逻辑选项,
+        视频槽输入, 解析视频源, 视频信息, 视频数据URI, 视频帧条目, ffmpeg可用,
         _输入被静音 as 输入被静音,
     )
     from .trucy_presets import 保存预设, 取预设, 预设选项
@@ -48,6 +53,7 @@ except ImportError:
     from trucy_media import (  # noqa: E402
         图片槽输入, 音频槽输入, 收集图片, 收集音频,
         构建素材清单, 构建媒体部分, 已连接音频, 解析标签家族, 标签逻辑选项,
+        视频槽输入, 解析视频源, 视频信息, 视频数据URI, 视频帧条目, ffmpeg可用,
         _输入被静音 as 输入被静音,
     )
     from trucy_presets import 保存预设, 取预设, 预设选项  # noqa: E402
@@ -178,13 +184,16 @@ def _解析skill加载器(skill加载器, LLM, 用户文本):
 
 
 # ---------------------------------------------------------------------------
-# 节点 1：LLM（三种LLM）
+# 节点 1：LLM Loader（三种大脑装载）
 # ---------------------------------------------------------------------------
-class TrucyLLM:
-    """三种LLM（下拉切换）：
+class TrucyLLMLoader:
+    """三种大脑装载器（下拉切换）：
     局域网LM Studio —— 填 http://<Mac-IP>:1234/v1 与模型 ID；
     远程API        —— 任何 OpenAI 兼容服务（ChatGPT / DeepSeek 等），填 api_base + api_key + model；
     本地GGUF       —— 用本机显卡跑 ComfyUI/models/LLM（含子文件夹）下的 gguf，主模型/投影各自下拉选择。
+
+    本节点只负责装载大脑，不执行任何 Skill；输出端口 LLM 可同时接给
+    Skill Runner 家族（Skill Loader/Chat/Prompt）与 VLM Runner。
     """
 
     @classmethod
@@ -236,10 +245,6 @@ class TrucyLLM:
                     "default": "lm-studio",
                     "tooltip": "API Key。LM Studio 不校验（任意非空）；DeepSeek/OpenAI 填真实 key（sk- 开头）。本地模式忽略。",
                 }),
-                "model": ("STRING", {
-                    "default": "gemma-4-e4b-it",
-                    "tooltip": "远程模型 ID。LM Studio 用 /v1/models 列表里的 id；DeepSeek 用 deepseek-chat / deepseek-reasoner。本地模式忽略。",
-                }),
                 "请求超时秒": ("INT", {
                     "default": 300, "min": 30, "max": 3600, "step": 10,
                     "tooltip": "远程LLM请求超时（秒）。推理型模型建议 >= 300。",
@@ -286,7 +291,7 @@ class TrucyLLM:
     RETURN_TYPES = ("TRUCY_BRAIN",)
     RETURN_NAMES = ("LLM",)
     FUNCTION = "run"
-    CATEGORY = "TrucyNodes/Skill Runner"
+    CATEGORY = "TrucyNodes/LLM Loader"
 
     def run(self, LLM类型="局域网LM Studio",
             api_base="http://192.168.1.112:1234/v1", api_key="lm-studio",
@@ -541,43 +546,54 @@ class TrucyChat:
 
 
 # ---------------------------------------------------------------------------
-# 节点 3.5：Vision (图像推理)
-#   —— 对标 comfyUI-llama-TE 的 QwenTE图像推理：LLM + 系统/用户提示词 + 图片 → 文本，
-#      不经过 Skill Loader（区别于 Chat/Prompt 的 skill 通道）；图片输入 8 个与 llama-TE 对齐。
+# 节点 3.5：VLM Runner（图片 / 视频推理）
+#   —— 对标 comfyUI-llama-TE 的 QwenTE图像推理并扩展视频：LLM + 系统/用户提示词
+#      + 图片（8 槽）或视频（1 个）→ 文本，不经过 Skill Loader（区别于 Chat/Prompt 的
+#      skill 通道）。图片/视频按「输入模式」互斥，不会同时发给大脑。
+#      视频双通道：本地 GGUF 大脑发原生视频文件（Qwen-VL 经 mtmd+ffmpeg 直接读视频，
+#      带时间戳）；远程大脑 / PATH 缺 ffmpeg / 原生发送失败 → 自动退化为等距抽帧。
 # ---------------------------------------------------------------------------
-class TrucyVisionInfer:
-    """LLM + 系统提示词 + 用户提示词 + 图片（8 槽）→ 文本。不调用 Skill。"""
+class TrucyVLMRunner:
+    """LLM + 系统提示词 + 用户提示词 + 图片（8 槽）或视频（1 个）→ 文本。不调用 Skill。"""
 
     @classmethod
     def INPUT_TYPES(cls):
         optional = {
             "输入媒体标签逻辑": (标签逻辑选项, {
                 "default": 标签逻辑选项[0],
-                "tooltip": "参考素材标签用哪套规范：自动识别 = 未接 Skill 按 H3 兜底（<Picture N>）；"
-                           "H3 = <Picture N>/<Audio N>；Qwen-Image-2.1 = <imageN>（多图必须用，单图不加标签）。",
+                "tooltip": "图片模式下参考图标签用哪套规范：自动识别 = 按 H3 兜底（<Picture N>）；"
+                           "H3 = <Picture N>；Qwen-Image-2.1 = <imageN>（多图必须用，单图不加标签）。"
+                           "视频模式不使用本设置（原生视频无逐帧标签；抽帧通道用「视频帧 N」指代）。",
             }),
             "参考图最长边": ("INT", {
                 "default": 0, "min": 0, "max": 2048, "step": 64,
-                "tooltip": "发给 LLM 前参考图的缩放边长，0 = 标准 1280。"
+                "tooltip": "发给 LLM 前参考图/视频采样帧的缩放边长，0 = 标准 1280。"
                            "小上下文LLM（如 LM Studio 8192）建议 768 或 512，防止视觉 token 挤爆上下文。",
+            }),
+            "视频抽帧数": ("INT", {
+                "default": 8, "min": 2, "max": 32, "step": 1,
+                "tooltip": "视频退化通道用：按等距时间点抽这么多帧发给大脑。仅在原生视频不可用"
+                           "（远程大脑 / PATH 缺 ffmpeg / 原生发送失败）时生效。帧越多越细节，越占上下文。",
             }),
         }
         optional.update(图片槽输入(数量=8))   # 与 llama-TE 的 QwenTE图像推理 对齐：8 个图片输入
-        optional.update(音频槽输入())
+        optional.update(视频槽输入())          # 1 个视频输入（与图片槽按「输入模式」互斥）
         return {
             "required": {
                 "LLM": ("TRUCY_BRAIN",),
-                "输入模式": (["图片", "文本"], {
+                "输入模式": (["图片", "视频"], {
                     "default": "图片",
-                    "tooltip": "图片 = 分析接入的参考图（1-8 槽）与参考音频；文本 = 纯文字推理，忽略所有媒体输入。",
+                    "tooltip": "图片 = 分析「🖼️ 参考图1-8」槽位接入的图片；"
+                               "视频 = 分析「🎬 视频」端口接入的 1 个视频。"
+                               "两种模式互斥、不会同时发送；两边都接时按本下拉取舍并记日志。",
                 }),
                 "系统提示词": ("STRING", {
-                    "default": "你是一个专业的图像分析助手。请仔细观察用户提供的图片，"
+                    "default": "你是一个专业的视觉分析助手。请仔细观察用户提供的图片或视频，"
                                "给出准确、详细、结构清晰的描述与分析。",
                     "multiline": True,
                 }),
                 "提示词": ("STRING", {
-                    "default": "请详细描述这张图片的内容。",
+                    "default": "请详细描述输入的内容。",
                     "multiline": True,
                 }),
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.0, "max": 2.0, "step": 0.05}),
@@ -589,44 +605,124 @@ class TrucyVisionInfer:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("文本",)
     FUNCTION = "run"
-    CATEGORY = "TrucyNodes/Vision"
+    CATEGORY = "TrucyNodes/VLM Runner"
 
     def run(self, LLM, 输入模式, 系统提示词, 提示词, temperature, max_tokens,
-            输入媒体标签逻辑=标签逻辑选项[0], 参考图最长边=0, **kwargs):
+            输入媒体标签逻辑=标签逻辑选项[0], 参考图最长边=0, 视频抽帧数=8, **kwargs):
         if 输入被静音(LLM):
-            _日志("图像推理节点: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
+            _日志("VLM Runner: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
                   "取消静音或改接 LLM 后重跑")
             return ("",)
+        模式 = str(输入模式)
+        视频对象 = kwargs.get("🎬 视频")
+        有视频输入 = 视频对象 is not None and not 输入被静音(视频对象)
+        有图片输入 = any(kwargs.get(f"🖼️ 参考图{i}") is not None for i in range(1, 9))
+
+        if 模式 == "视频":
+            if 有图片输入:
+                _日志("VLM Runner: 已连接参考图槽位，但当前为视频模式——图片已忽略"
+                      "（切到「图片」模式即可分析图片）")
+            if not 有视频输入:
+                raise ValueError(
+                    "视频模式：请在「🎬 视频」端口连接 1 个视频（LoadVideo 节点的输出）；"
+                    "若想分析图片，请把「输入模式」改回「图片」并连接参考图槽位。")
+            return self._跑视频(LLM, 系统提示词, 提示词, temperature, max_tokens,
+                               视频对象, 视频抽帧数)
+
+        # 图片模式
+        if 有视频输入:
+            _日志("VLM Runner: 已连接视频端口，但当前为图片模式——视频已忽略"
+                  "（切到「视频」模式即可分析视频）")
         # 多参考素材收集（空值安全：None/零尺寸/坏槽位/被静音跳过不报错，也不发给 LLM）
-        图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None) if 输入模式 == "图片" else []
-        视频条目 = []  # 视频参考端口已摘除（99.99% 不用）；媒体层后端保留，加一行即复活
-        音频条目 = 收集音频(kwargs) if 输入模式 == "图片" else []
+        图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None)
+        if not 图片条目:
+            raise ValueError(
+                "图片模式：请在「🖼️ 参考图1-8」槽位至少连接 1 张图片；"
+                "若想分析视频，请把「输入模式」改为「视频」并连接「🎬 视频」端口。")
+        return self._跑图片(LLM, 系统提示词, 提示词, temperature, max_tokens,
+                           图片条目, 输入媒体标签逻辑)
 
-        # 标签家族：未接 Skill，按下拉指定；自动识别时 H3 兜底（<Picture N>）
-        有素材 = bool(图片条目 or 音频条目)
-        图像标签模式 = 解析标签家族(输入媒体标签逻辑, None, 有素材=有素材)
+    # ---- 图片模式 ----
+    def _跑图片(self, LLM, 系统提示词, 提示词, temperature, max_tokens, 图片条目, 标签逻辑):
+        图像标签模式 = 解析标签家族(标签逻辑, None, 有素材=True)
+        messages, 媒体部分 = self._组装(系统提示词, 提示词, 图片条目, [], 图像标签模式)
+        _日志(f"VLM Runner → {LLM.describe()} | 模式=图片 | "
+              f"输入媒体标签={'QWI(<imageN>)' if 图像标签模式 else 'H3(<Picture N>)'} | "
+              f"images={len(图片条目)}")
+        content, usage = LLM.chat(
+            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+        )
+        return self._收尾(content, usage)
 
+    # ---- 视频模式 ----
+    def _跑视频(self, LLM, 系统提示词, 提示词, temperature, max_tokens,
+               视频对象, 抽帧数):
+        路径, 需清理 = 解析视频源(视频对象, "视频")
+        try:
+            信息 = 视频信息(路径) or {}
+            原生 = False
+            url = ""
+            if isinstance(LLM, TrucyLocalBrain):
+                if ffmpeg可用():
+                    原生, url = True, 路径
+                else:
+                    _日志("VLM Runner: 本地大脑原生视频需要 PATH 上的 ffmpeg + ffprobe"
+                          "（llama.cpp 以子进程调用解码），未找到——本次自动抽帧发送")
+            else:
+                _日志("VLM Runner: 远程大脑不走原生视频通道（兼容性优先）——本次自动抽帧发送")
+            if 原生:
+                视频条目 = [{"kind": "视频", "slot": 1, "n": 1, "label": "视频",
+                           "原生": True, "url": url, "path": 路径,
+                           "duration": 信息.get("duration", 0.0),
+                           "fps": 信息.get("fps", 0.0),
+                           "width": 信息.get("width", 0), "height": 信息.get("height", 0),
+                           "frames": []}]
+            else:
+                视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
+            messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, False)
+            _日志(f"VLM Runner → {LLM.describe()} | 模式=视频 | "
+                  f"{'原生视频文件' if 原生 else '抽帧×%d' % len(视频条目[0]['frames'])} | "
+                  f"{信息.get('width', 0)}x{信息.get('height', 0)}，"
+                  f"约{信息.get('duration', 0.0):.1f}秒")
+            try:
+                content, usage = LLM.chat(
+                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+                )
+            except Exception as e:
+                if not 原生:
+                    raise
+                _日志(f"VLM Runner: 原生视频发送失败（{e}），自动改为抽帧重试")
+                视频条目 = [视频帧条目(视频对象, 采样帧数=抽帧数)]
+                messages, 媒体部分 = self._组装(系统提示词, 提示词, [], 视频条目, False)
+                _日志(f"VLM Runner → {LLM.describe()} | 模式=视频 | "
+                      f"抽帧×{len(视频条目[0]['frames'])}（重试）")
+                content, usage = LLM.chat(
+                    messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
+                )
+            return self._收尾(content, usage)
+        finally:
+            if 需清理:
+                from pathlib import Path
+
+                Path(路径).unlink(missing_ok=True)
+
+    # ---- 公共组装 / 收尾 ----
+    def _组装(self, 系统提示词, 提示词, 图片条目, 视频条目, 图像标签模式):
         messages = []
         system_text = (系统提示词 or "").strip()
         if system_text:
             messages.append({"role": "system", "content": system_text})
         user_text = str(提示词 or "").strip()
-        if not user_text and not 有素材:
-            raise ValueError("提示词不能为空（也未接入任何参考素材）。")
         if not user_text:
             user_text = "请分析提供的输入。"
-        if 有素材:
-            user_text += "\n\n" + 构建素材清单(图片条目, 视频条目, 音频条目, 图像标签模式)
+        if 图片条目 or 视频条目:
+            user_text += "\n\n" + 构建素材清单(图片条目, 视频条目, [], 图像标签模式)
         messages.append({"role": "user", "content": user_text})
+        媒体部分 = 构建媒体部分(图片条目, 视频条目, [], 图像标签模式)
+        return messages, 媒体部分
 
-        媒体部分 = 构建媒体部分(图片条目, 视频条目, 音频条目, 图像标签模式)
-        _日志(f"图像推理 → {LLM.describe()} | 模式={输入模式} | "
-              f"输入媒体标签={'QWI(<imageN>)' if 图像标签模式 else 'H3(<Picture N>)'} | "
-              f"images={len(图片条目)} audios={len(音频条目)}")
-        content, usage = LLM.chat(
-            messages, temperature=temperature, max_tokens=max_tokens, 媒体部分=媒体部分
-        )
-        _日志(f"图像推理 ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
+    def _收尾(self, content, usage):
+        _日志(f"VLM Runner ← {len(content)} chars | tokens={usage.get('total_tokens', '?')}")
         result = _清洗输出(content)
         # 基础质量检查：只记日志，不打断（毫秒级纯 Python）
         问题 = 检查通用(result)
@@ -1053,17 +1149,19 @@ class TrucyPromptH3QWI:
 # ---------------------------------------------------------------------------
 
 NODE_CLASS_MAPPINGS = {
-    "TrucyLLM": TrucyLLM,
+    "TrucyLLMLoader": TrucyLLMLoader,
     "TrucySkillLoader": TrucySkillLoader,
     "TrucyChat": TrucyChat,
     "TrucyPromptH3QWI": TrucyPromptH3QWI,
     "TrucyUnloadModel": TrucyUnloadModel,
+    "TrucyVLMRunner": TrucyVLMRunner,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "TrucyLLM": "🚀 Skill Runner Trucy · LLM",
-    "TrucySkillLoader": "🚀 Skill Runner Trucy · Skill Loader",
+    "TrucyLLMLoader": "🚀 LLM Loader Trucy",
+    "TrucySkillLoader": "🚀 Skill Loader Trucy",
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
     "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
+    "TrucyVLMRunner": "🚀 VLM Runner Trucy",
 }

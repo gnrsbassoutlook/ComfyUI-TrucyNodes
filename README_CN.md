@@ -4,15 +4,17 @@
 ---
 
 ## 📖 简介
-TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它打通了从剧本资产读取（Excel/TXT/DOCX）、按索引加载素材（图/音/视频）、高阶逻辑循环（For-Loop）到后期视频合成的全流程；并通过 **Skill Runner Trucy**（三种大脑 + Skill 执行器）与 **ref2v Trucy**（MiniMax H3 参考生视频）两大模块，把「本地大模型出提示词 → 参考素材编码 → 采样出片」整条链收进一个节点包。它强调“导演思维”，通过精准的参数控制和算力优化，让 AI 创作从“抽卡”进化为“生产”。
+TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它打通了从剧本资产读取（Excel/TXT/DOCX）、按索引加载素材（图/音/视频）、高阶逻辑循环（For-Loop）到后期视频合成的全流程；并通过 **LLM Loader Trucy**（三种大脑装载器）→ **Skill Runner Trucy**（skill 执行器）/ **VLM Runner Trucy**（图文推理）与 **ref2v Trucy**（MiniMax H3 参考生视频）等模块，把「本地大模型出提示词 → 参考素材编码 → 采样出片」整条链收进一个节点包。它强调“导演思维”，通过精准的参数控制和算力优化，让 AI 创作从“抽卡”进化为“生产”。
 
 **[🇺🇸 English Version](./README.md)**
 
 ---
 
-### [2026-10-16] 「大脑与参考」更新：LLM Skill Runner + MiniMax H3 ref2v
-🧠 **Skill Runner Trucy**（自 ComfyUI-TrucyLLM 合并）：技能执行器节点族——LLM（局域网LM Studio / 远程API / 本地GGUF）→ Skill加载器 → 对话 / 提示词（H3·QWI）→ 卸载本地模型。大脑输出端口更名为 **LLM**。附带 API预设地址簿与零打断质量层。
-🎬 **ref2v Trucy**：MiniMax H3 Ref2VA 参考编码双形态——缓存层双节点（参考编码刻意不接提示词，改提示词时蹭 ComfyUI 内置缓存零重算）+ 合并版单节点（提示词必失效，改节点内 LRU 自管缓存）。
+### [2026-10-16] 「大脑与参考」更新：LLM Loader + Skill Runner + VLM Runner + MiniMax H3 ref2v
+🧠 **LLM Loader Trucy**（自 ComfyUI-TrucyLLM 合并）：大脑装载器——一个节点三种大脑（局域网LM Studio / 远程API / 本地GGUF）。它只装载大脑、本身不执行任何 Skill；**LLM** 输出端口同时喂给 **Skill Runner Trucy** 家族与 **VLM Runner Trucy** 节点。
+🛠️ **Skill Runner Trucy**：真正的 skill 执行器家族——Skill Loader → Chat / Prompt (H3·QWI) → 卸载模型，附带 API预设地址簿与零打断质量层。
+👁️ **VLM Runner Trucy**：无 skill 机制的图文推理——**最多 8 张图片或 1 个视频，图文互斥**。本地 GGUF 大脑直接收**视频文件本体**（Qwen-VL 经 llama.cpp mtmd + ffmpeg 原生读视频，带时间戳）；远程大脑 / 缺 ffmpeg / 原生发送失败时**自动退化为等距抽帧**。设计上**没有文本模式**——纯文本对话是 Chat 节点的活。
+🎬 **ref2v Trucy**：MiniMax H3 Ref2VA 参考编码双形态——缓存层双节点（参考编码刻意不接提示词，只改提示词时蹭 ComfyUI 内置缓存跳过 VAE 重编码）+ 合并版单节点（提示词必失效，改节点内 LRU 自管缓存）。
 🧹 清理：移除早已废弃的 Klein 编码节点与两个过时的 H3 预处理/提示词节点；README 按实际在册节点全量重写。
 
 ### [2026-07-03] 工业级生产管线整合：性能与稳定性里程碑
@@ -32,7 +34,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ## 🚀 核心模块详述
 
-**共 49 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/Skill Runner`、`/ref2v`。
+**共 50 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/LLM Loader`、`/Skill Runner`、`/VLM Runner`、`/ref2v`。
 
 ### 1. 逻辑与流程控制 (Logic 系列)
 *   **Trucy For Loop (Start / End, 9路 / 2路)**: 逻辑核心。
@@ -77,33 +79,41 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 *   **TrucyVideoLoaderIndex**: 专业代理视频流程——FPS 抽帧、分辨率代理缩放、越界保护。
 *   **TrucyVideoCombine**: FFmpeg 管道直通编码（注册在 VHS 分类下）。不产生垃圾文件，支持 MP4/WebP/GIF 及音频自动混流。
 
-### 6. Skill Runner Trucy（LLM + Skill 执行器）
-把任何 OpenAI 兼容大脑变成节点驱动的提示词工厂。大脑节点的输出端口叫 **LLM**，直插各 Skill 执行节点。
+### 6. LLM Loader Trucy（大脑装载器）
+装载三种大脑之一，从 **LLM** 端口输出。它本身不执行任何 Skill——同一个大脑既喂给 **Skill Runner Trucy** 家族（第 7 节），也喂给 **VLM Runner Trucy** 节点（第 8 节）。
 
-*   **🚀 Skill Runner Trucy · LLM**：三种大脑一个下拉切换——
+*   **🚀 LLM Loader Trucy**：三种大脑一个下拉切换——
     *   **局域网LM Studio**（`http://<Mac-IP>:1234/v1`，默认 `gemma-4-e4b-it`）
     *   **远程API**：DeepSeek / OpenAI / 任何 OpenAI 兼容服务（`api_base` + `api_key` + `model`；只写域名如 `https://api.deepseek.com` 自动补 `/v1`）。**`model` 是必填自由文本框**——任意模型 ID 随手填，含中转站模型名（如 `gemini-3.1-flash-lite-preview`）；「API预设」选中只帮填、不锁死，之后随便改
     *   **本地GGUF**：本机显卡跑 `ComfyUI/models/LLM`（含子文件夹）下的 gguf，带 mmproj 视觉投影、`n_ctx` / `n_gpu_layers` / `n_batch` 与 Qwen3.8 系思考控制
-*   **🚀 Skill Runner Trucy · Skill Loader**：扫描内置 `skills/`（及 `comfyUI-llama-TE/skills`，存在时自动兼容）；可固定选一个，也可交给大脑自动匹配。
+
+**API预设地址簿**：LLM 节点带「API预设」下拉 + 「＋ 保存为API预设」按钮，存于插件目录 `api_presets.json`（**本地明文含 Key，切勿外发整个插件目录**）。
+
+### 7. Skill Runner Trucy（skill 执行器）
+真正的 skill 执行器家族：**LLM Loader → Skill Loader → Chat / Prompt → 卸载模型**。
+
+*   **🚀 Skill Loader Trucy**：扫描内置 `skills/`（及 `comfyUI-llama-TE/skills`，存在时自动兼容）；可固定选一个，也可交给大脑自动匹配。
 *   **🚀 Skill Runner Trucy · Chat**：大脑 + Skill + 提示词 → 文本，带 **12 个参考素材槽位**（🖼️ 图1-9 / 🎵 音1-3）。空槽位跳过并记日志，绝不卡流水线。
 *   **🚀 Skill Runner Trucy · Prompt (H3/QWI)**：两套官方提示词 Skill 一个节点搞定——**H3**（MiniMax 视频提示词，`[Shot N]` 分镜 + 音效/配乐）与 **Qwen-Image-2.1**（图像提示词重写）。质量层只检查记日志、**零打断**（可选一次自动纠正，默认关）。
 *   **🚀 Skill Runner Trucy · Unload Model**：采样前释放本地 GGUF 显存；把「上游」通配输入接到提示词节点输出即可固定执行顺序。
 
-**API预设地址簿**：LLM 节点带「API预设」下拉 + 「＋ 保存为API预设」按钮，存于插件目录 `api_presets.json`（**本地明文含 Key，切勿外发整个插件目录**）。
+### 8. VLM Runner Trucy（图像 / 视频推理）
+纯**系统提示词 + 用户提示词 + 图片或视频 → 文本**——**不经过 Skill Loader**（与 Skill Runner 家族的唯一区别即此）。形态对标 `comfyUI-llama-TE` 的 `QwenTE图像推理`，并扩展了视频输入。
 
-### 7. Vision Trucy（图像推理）
-纯**系统提示词 + 用户提示词 + 图片 → 文本**——**不经过 Skill Loader**（与 Skill Runner 家族的唯一区别即此）。形态对标 `comfyUI-llama-TE` 的 `QwenTE图像推理`，同样 **8 个图片输入**。
-
-*   **🚀 Vision Trucy · 图像推理**：LLM（三种大脑任意）+「输入模式」（图片/文本）+ 系统/用户提示词 + 🖼️ 参考图1-8（+ 🎵 参考音频1-3）→ 文本。适合批量图片打标/描述、参考素材分析（如把三视图/场景图喂给 H3 ref2v 管线前先过一遍）、或任何视觉问答——提示词框直达，零 Skill 机制。
-*   复用整套媒体层：槽位空值安全、`<Picture N>` / `<imageN>` 标签（自动识别，H3 兜底）、质量层只记日志不打断。
-*   **注意**：图片能否真到模型取决于大脑——本地 GGUF 需选 mmproj 投影；DeepSeek API 现已支持图片（返回模型名为 `deepseek-flash`）；纯文本模型在图片模式下会报错，把「输入模式」切到文本即可。
+*   **🚀 VLM Runner Trucy**：LLM（三种大脑任意）+「输入模式」（**图片 / 视频——互斥，绝不并用**）+ 系统/用户提示词 → 文本：
+    *   **图片模式**：🖼️ 参考图1-8，带 `<Picture N>` / `<imageN>` 标签（自动识别，H3 兜底）
+    *   **视频模式**：🎬 一个视频（接 LoadVideo 输出）。本地 GGUF 大脑直接收**视频文件本体**——llama.cpp 的 mtmd 通过 ffmpeg 子进程解码（需 PATH 里有 `ffmpeg` + `ffprobe`，常见 ComfyUI 整合包都自带），Qwen-VL 以约 4 fps 原生读视频并带时间戳。远程大脑、缺 ffmpeg 或原生发送失败时**自动退化为等距抽帧**（「视频抽帧数」，默认 8）按图片发送——每帧保留时间戳，时间维度的分析在退化通道下依然成立
+    *   两边都接了？由模式下拉决定发给大脑的内容，另一边忽略并记一行日志
+*   **设计上没有文本模式**——纯文本对话请用 Skill Runner 的 Chat 节点。某模式下什么都没接时报错说清楚，绝不发空提示词。
+*   复用整套媒体层：槽位空值安全、质量层只记日志不打断。
+*   **注意**：媒体能否真到模型取决于大脑——本地 GGUF 需选 mmproj 投影；DeepSeek API 现已支持图片（返回模型名为 `deepseek-flash`），视频模式走抽帧退化。
 
 ### 8. H3 ref2v Trucy（MiniMax H3 参考生视频）
 官方 MiniMax H3 Ref2VA 管线的参考 conditioning，双形态任意选（参考编码数学逐位一致，单测对冲）：
 
-*   **🚀 ref2v Trucy · 参考编码（缓存层）**：参考图/音频 + 双 VAE → AV latent + ref_data。**刻意没有 prompt 输入**——只改提示词时 ComfyUI 内置缓存直接跳过 VAE 重编码。
-*   **🚀 ref2v Trucy · 提示词编码（出口）**：clip + prompt + 上游 ref_data → positive conditioning；提示词变动时只有它重跑。
-*   **🚀 ref2v Trucy · 参考转视频（合并版）**：单框形态，连线同官方 `MiniMaxH3ReferenceToVideo`；因含 prompt 缓存必失效，改**节点内 LRU 自管缓存**（每槽位内容 sha1 + VAE 实例身份 + 弱引用存活校验）。
+*   **🚀 H3 ref2v Trucy · 参考编码（缓存层）**：参考图/音频 + 双 VAE → AV latent + ref_data。**刻意没有 prompt 输入**——只改提示词时 ComfyUI 内置缓存直接跳过 VAE 重编码。
+*   **🚀 H3 ref2v Trucy · 提示词编码（出口）**：clip + prompt + 上游 ref_data → positive conditioning；提示词变动时只有它重跑。
+*   **🚀 H3 ref2v Trucy · 参考转视频（合并版）**：单框形态，连线同官方 `MiniMaxH3ReferenceToVideo`；因含 prompt 缓存必失效，改**节点内 LRU 自管缓存**（每槽位内容 sha1 + VAE 实例身份 + 弱引用存活校验）。
 
 两种形态都复用官方 helper（`_resize` / `_encode_ref_audio` / `_empty_av_latent`），遵循官方 `<Picture N>` / `<Audio N>` 标签规范（我们槽位 1 起编号 vs 官方 `ref_image_0` 0 起——端口名只是 kwargs 键，对结果零影响），全链路空值安全。视频参考端口已按决定摘除（确需时用官方 `MiniMaxH3ReferenceToVideo`，仍在册；收集后端休眠于 `trucy_media.py`）。
 

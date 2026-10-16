@@ -11,7 +11,7 @@ openpyxl>=3.0.0         # Excel 节点读取 .xlsx
 # 仅「本地 GGUF」模式不可用（节点会提示缺少 llama_cpp）。
 #
 # 推荐：安装预编译 wheel（免本地编译，无需 CUDA Toolkit / VS Build Tools）
-#   社区通用来源：https://github.com/JamePeng/llama-cpp-python/releases
+#   社区通用来源：https://github.com/JamePeng/llama-cpp-python （Releases 页发布预编译 whl）
 #   （覆盖 CUDA 12.4 / 12.6 / 12.8 / 13.1，Python 3.10~3.14，Windows / Linux x64，
 #     以 releases 页面实际发布的版本为准）
 #   下载对应 CUDA 版本 + Python 版本的 whl 后执行：

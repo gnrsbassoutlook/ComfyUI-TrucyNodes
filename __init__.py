@@ -46,14 +46,15 @@ def _safe_import(module_name, class_names):
 )
 
 # LLM / ref2v 节点族（合并自 ComfyUI-TrucyLLM，2026-10-16）
-#   trucy_skill_runner.py —— Skill Runner Trucy：LLM / Skill Loader / Chat / Vision(图像推理) /
-#                           Prompt (H3/QWI) / Unload
+#   trucy_skill_runner.py —— LLM Loader Trucy（三通道大脑装载，独立类目）；
+#                          Skill Runner Trucy 家族（Skill Loader / Chat / Prompt / Unload）；
+#                          VLM Runner Trucy（图片/视频推理，独立类目）
 #   trucy_ref2v.py        —— H3 ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
-(TrucyLLM, TrucySkillLoader, TrucyChat, TrucyPromptH3QWI, TrucyUnloadModel) = _safe_import(
+(TrucyLLMLoader, TrucySkillLoader, TrucyChat, TrucyPromptH3QWI, TrucyUnloadModel) = _safe_import(
     "trucy_skill_runner",
-    ["TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
+    ["TrucyLLMLoader", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
 )
-(TrucyVisionInfer,) = _safe_import("trucy_skill_runner", ["TrucyVisionInfer"])
+(TrucyVLMRunner,) = _safe_import("trucy_skill_runner", ["TrucyVLMRunner"])
 (TrucyH3RefEncode, TrucyH3PromptEncode, TrucyH3RefToVideo) = _safe_import(
     "trucy_ref2v",
     ["TrucyH3RefEncode", "TrucyH3PromptEncode", "TrucyH3RefToVideo"],
@@ -106,14 +107,15 @@ optional_nodes = {
     "TrucyAnySwitch10": TrucyAnySwitch10,
     "TrucyControlBridge": TrucyControlBridge,
     "TrucyFrameSecondsConverter": TrucyFrameSecondsConverter,
-    # Skill Runner Trucy 节点族
-    "TrucyLLM": TrucyLLM,
+    # LLM Loader Trucy（三通道大脑装载，独立类目）
+    "TrucyLLMLoader": TrucyLLMLoader,
+    # Skill Runner Trucy 节点族（Skill 执行器）
     "TrucySkillLoader": TrucySkillLoader,
     "TrucyChat": TrucyChat,
     "TrucyPromptH3QWI": TrucyPromptH3QWI,
     "TrucyUnloadModel": TrucyUnloadModel,
-    # Vision Trucy 节点族（图像推理，不调用 Skill）
-    "TrucyVisionInfer": TrucyVisionInfer,
+    # VLM Runner Trucy（图片/视频推理，不调用 Skill）
+    "TrucyVLMRunner": TrucyVLMRunner,
     # H3 ref2v Trucy 节点族
     "TrucyH3RefEncode": TrucyH3RefEncode,
     "TrucyH3PromptEncode": TrucyH3PromptEncode,
@@ -165,14 +167,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyForLoopEnd9ch": "🚀 Trucy For Loop End (9ch)",
     "TrucyForLoopStart2ch": "🚀 Trucy For Loop Start (2ch)",
     "TrucyForLoopEnd2ch": "🚀 Trucy For Loop End (2ch)",
-    # Skill Runner Trucy 节点族（LLM + Skill 执行）
-    "TrucyLLM": "🚀 Skill Runner Trucy · LLM",
-    "TrucySkillLoader": "🚀 Skill Runner Trucy · Skill Loader",
+    # LLM Loader Trucy（三通道大脑装载，独立类目；端口名仍为 LLM）
+    "TrucyLLMLoader": "🚀 LLM Loader Trucy",
+    # Skill Runner Trucy 节点族（真正的 Skill 执行器）
+    "TrucySkillLoader": "🚀 Skill Loader Trucy",
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
     "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
-    # Vision Trucy 节点族（图像推理，不调用 Skill）
-    "TrucyVisionInfer": "🚀 Vision Trucy · 图像推理",
+    # VLM Runner Trucy（图片/视频推理，独立类目）
+    "TrucyVLMRunner": "🚀 VLM Runner Trucy",
     # H3 ref2v Trucy 节点族（H3 Ref2VA 编码/缓存）
     "TrucyH3RefEncode": "🚀 H3 ref2v Trucy · 参考编码（缓存层）",
     "TrucyH3PromptEncode": "🚀 H3 ref2v Trucy · 提示词编码（出口）",
@@ -225,9 +228,10 @@ except Exception as _e:  # 非 ComfyUI 环境（单测直 import）时静默跳�
     print(f"\033[33m[TrucyNodes]\033[0m API预设接口未注册（{_e}），节点内「保存为预设」路径仍可用")
 
 _LLM节点数 = sum(1 for k in NODE_CLASS_MAPPINGS
-                 if k in ("TrucyLLM", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI",
-                          "TrucyUnloadModel", "TrucyVisionInfer", "TrucyH3RefEncode",
+                 if k in ("TrucyLLMLoader", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI",
+                          "TrucyUnloadModel", "TrucyVLMRunner", "TrucyH3RefEncode",
                           "TrucyH3PromptEncode", "TrucyH3RefToVideo"))
 print("\033[36m[TrucyNodes]\033[0m "
-      f"{len(NODE_CLASS_MAPPINGS)} nodes | Skill Runner Trucy + Vision Trucy + H3 ref2v Trucy 已合并入本包"
+      f"{len(NODE_CLASS_MAPPINGS)} nodes | LLM Loader Trucy + Skill Runner Trucy + VLM Runner Trucy"
+      f" + H3 ref2v Trucy 已合并入本包"
       f"（LLM 节点 {_LLM节点数}/9；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")
