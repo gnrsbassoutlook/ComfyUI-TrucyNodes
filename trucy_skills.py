@@ -184,10 +184,18 @@ def 构建skill系统提示词(base_system, skill, extra_blocks=None):
     extra_blocks: 额外文本块列表（例如按需读取的 references 内容）。
     """
     references = "\n".join(f"- {p}" for p in skill.get("references", [])) or "- 无"
+    if extra_blocks:
+        # 附录已随请求注入：明确告诉模型「只看给出的，别臆测没给的」
+        参考说明 = (
+            f"references 目录：\n{references}\n"
+            "本次已随请求附带其中部分附录（见后文 ===== 分块），严格按已给出的内容执行；"
+            "未附带的附录不要臆测其内容。"
+        )
+    else:
+        参考说明 = f"可用 references（单次推理不会自动加载，请按任务需要取用）：\n{references}"
     parts = [
         str(base_system or "").strip(),
-        f"当前 Skill：{skill['name']} ({skill['id']})\n"
-        f"可用 references（单次推理不会自动加载，请按任务需要取用）：\n{references}\n\n"
+        f"当前 Skill：{skill['name']} ({skill['id']})\n{参考说明}\n\n"
         f"===== {skill['skill_file']} =====\n{读取skill正文(skill)}",
     ]
     if extra_blocks:

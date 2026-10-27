@@ -349,6 +349,206 @@ def 修复QWI(text):
 
 
 # ---------------------------------------------------------------------------
+# MOSS-Image（Prompt Enhancer）
+# ---------------------------------------------------------------------------
+MOSS分隔行 = "===== PROMPT ====="
+MOSS尺寸行 = re.compile(r"^\s*尺寸\s*[:：]\s*(\d+)\s*[x×X*]\s*(\d+)\s*$")
+MOSS根键 = {"summary", "items", "bbox_coord_space", "bbox_format"}
+
+
+def 解析MOSS(text):
+    """拆出 (尺寸元组或 None, 提示词正文)。
+
+    尺寸行与分隔行属于节点契约元信息，不进提示词正文：Layout 用
+    「尺寸：WxH + 空行 + ===== PROMPT ===== + 一行 JSON」，Caption 直接给散文。
+    """
+    尺寸 = None
+    行列表 = str(text or "").split("\n")
+    保留 = []
+    for 行 in 行列表:
+        m = MOSS尺寸行.match(行)
+        if m and 尺寸 is None:
+            尺寸 = (int(m.group(1)), int(m.group(2)))
+            continue
+        保留.append(行)
+    正文 = "\n".join(保留)
+    if MOSS分隔行 in 正文:
+        正文 = 正文.split(MOSS分隔行, 1)[1]
+    return 尺寸, 正文.strip()
+
+
+def 检查MOSS(text, mode="Caption", aspect_hint=""):
+    """MOSS-Image 输出契约检查。返回问题列表（空 = 通过），只记日志不打断。"""
+    问题 = []
+    原文 = str(text or "")
+    if not 原文.strip():
+        return ["输出为空"]
+
+    尺寸, 正文 = 解析MOSS(原文)
+    if not 正文:
+        return ["提示词正文为空（可能只有尺寸行或分隔行）"]
+    if mode not in ("Caption", "Layout"):
+        # Auto：按输出形态反推（有尺寸行或分隔行就是 Layout 稿）
+        mode = "Layout" if (尺寸 is not None or MOSS分隔行 in 原文) else "Caption"
+
+    if mode != "Layout":
+        if 正文.lstrip().startswith("{"):
+            问题.append("Caption 模式输出了 JSON（应只给散文描述）")
+        问题.extend(检查空话(正文))
+        if 尺寸 is not None:
+            问题.append("Caption 模式出现了「尺寸：」行（该行仅 Layout 需要）")
+        return 问题
+
+    # —— Layout ——
+    if 尺寸 is None:
+        问题.append("缺少「尺寸：WxH」行（Layout 必须显式声明画布）")
+    else:
+        for 名, 值 in zip(("宽", "高"), 尺寸):
+            if 值 <= 0 or 值 % 16 != 0:
+                问题.append(f"画布{名} {值} 不是 16 的正整数倍")
+    if MOSS分隔行 not in 原文:
+        问题.append(f"缺少 {MOSS分隔行} 分隔行")
+    if 正文.count("\n"):
+        问题.append("Layout 正文应为单行 JSON（检测到换行）")
+
+    数据 = None
+    try:
+        import json
+
+        数据 = json.loads(正文)
+    except Exception as 错:
+        问题.append(f"Layout JSON 无法解析：{str(错)[:80]}")
+        return 问题
+
+    if not isinstance(数据, dict):
+        return 问题 + ["Layout 顶层不是 JSON 对象"]
+    键集 = set(数据.keys())
+    if 键集 != MOSS根键:
+        多 = sorted(键集 - MOSS根键)
+        缺 = sorted(MOSS根键 - 键集)
+        if 多:
+            问题.append(f"Layout 出现非法字段 {多}（编译器会拒绝）")
+        if 缺:
+            问题.append(f"Layout 缺少必需字段 {缺}")
+    if 数据.get("bbox_coord_space") != "abs_centralized":
+        问题.append("bbox_coord_space 应为 abs_centralized（说明未做中心化编译）")
+    if 数据.get("bbox_format") != "yxyx":
+        问题.append("bbox_format 应为 yxyx（顺序 y1,x1,y2,x2）")
+
+    summary = 数据.get("summary")
+    if not isinstance(summary, dict) or not str(summary.get("caption") or "").strip():
+        问题.append("summary.caption 缺失或为空")
+    elif set(summary.keys()) - {"caption", "meta", "canvas", "palette"}:
+        问题.append(f"summary 出现非法字段 {sorted(set(summary.keys()) - {'caption', 'meta', 'canvas', 'palette'})}")
+
+    items = 数据.get("items")
+    if not isinstance(items, list) or not items:
+        return 问题 + ["items 必须是非空数组"]
+
+    宽, 高 = 尺寸 or (0, 0)
+    半宽, 半高 = 宽 // 2, 高 // 2
+    框表 = []
+    for i, 项 in enumerate(items):
+        if not isinstance(项, dict):
+            问题.append(f"items[{i}] 不是对象")
+            continue
+        非法 = set(项.keys()) - {"label", "caption", "bbox", "text", "tags", "palette"}
+        if 非法:
+            问题.append(f"items[{i}] 出现非法字段 {sorted(非法)}")
+        标签 = 项.get("label")
+        if 标签 not in ("object", "character", "text"):
+            问题.append(f"items[{i}].label 必须是 object/character/text，实际 {标签!r}")
+        if not str(项.get("caption") or "").strip():
+            问题.append(f"items[{i}].caption 为空")
+        if 标签 == "text" and not str(项.get("text") or "").strip():
+            问题.append(f"items[{i}] 是 text 项但缺少 text 字段")
+        bbox = 项.get("bbox")
+        if not (isinstance(bbox, list) and len(bbox) == 4
+                and all(isinstance(v, int) and not isinstance(v, bool) for v in bbox)):
+            问题.append(f"items[{i}].bbox 必须是 4 个整数，实际 {bbox!r}")
+            continue
+        框表.append((i, bbox))
+
+    # 全框非负 = 大概率直接写了左上角像素而没减中心，此时越界也是同一病因，不重复报
+    未中心化 = bool(框表) and all(b[0] >= 0 and b[1] >= 0 for _, b in 框表)
+    if 未中心化:
+        问题.append("所有 bbox 均为非负像素，疑似忘做中心化（应减 W//2、H//2）")
+    for i, bbox in 框表:
+        v1, v2, v3, v4 = bbox
+        if v1 >= v3 or v2 >= v4:
+            问题.append(f"items[{i}].bbox 顺序或尺寸异常 {bbox}（应为 y1<x…见 compile-rules）")
+        if 未中心化 or not (宽 and 高):
+            continue
+        if not (-半高 <= v1 and v3 <= 高 - 半高 and -半宽 <= v2 and v4 <= 宽 - 半宽):
+            问题.append(
+                f"items[{i}].bbox 超出 {宽}×{高} 画布：{bbox}"
+                "（纵向须在 ±H//2 内、横向须在 ±W//2 内；顺序写反也会触发这条）")
+    if isinstance(summary, dict):
+        问题.extend(检查空话(str(summary.get("caption") or "")))
+    return 问题
+
+
+def 修复MOSS(text, mode="Auto"):
+    """确定性修复：Layout 忘做中心化时，按官方编译规则替模型算好。
+
+    实测小模型常见失误——格式、结构、字段全对，唯独把 bbox 写成左上角像素
+    就交了（忘了减半宽半高）。这是纯算术、结果唯一，不该指望模型算准：
+    只在「所有 bbox 均为非负、且都落在画布内」这一明确未编译状态动作；
+    混合态（有的已中心化有的没做）或坐标本身越界时不动，只交给检查层报。
+
+    返回 (新文本, 修了什么列表)。
+    """
+    notes = []
+    原文 = str(text or "")
+    尺寸, 正文 = 解析MOSS(原文)
+    if mode == "Caption" or not 尺寸 or not 正文.lstrip().startswith("{"):
+        return 原文, notes
+    try:
+        import json
+
+        数据 = json.loads(正文)
+    except Exception:
+        return 原文, notes
+    if not isinstance(数据, dict):
+        return 原文, notes
+    items = 数据.get("items")
+    if not isinstance(items, list) or not items:
+        return 原文, notes
+    宽, 高 = 尺寸
+    if not (宽 > 0 and 高 > 0 and 宽 % 16 == 0 and 高 % 16 == 0):
+        return 原文, notes
+
+    框表 = []
+    for 项 in items:
+        if not isinstance(项, dict):
+            return 原文, notes
+        b = 项.get("bbox")
+        if not (isinstance(b, list) and len(b) == 4
+                and all(isinstance(v, int) and not isinstance(v, bool) for v in b)):
+            return 原文, notes
+        框表.append(b)
+    # 已有负值 = 模型自己减过了，不重复减
+    if any(b[0] < 0 or b[1] < 0 for b in 框表):
+        return 原文, notes
+    for x1, y1, x2, y2 in 框表:
+        if not (0 <= x1 < x2 <= 宽 and 0 <= y1 < y2 <= 高):
+            return 原文, notes
+
+    半宽, 半高 = 宽 // 2, 高 // 2
+    for 项, (x1, y1, x2, y2) in zip(items, 框表):
+        # 官方编译：左/上 floor，右/下 ceil，再减中心；顺序 y,x,y,x
+        项["bbox"] = [y1 - 半高, x1 - 半宽, y2 - 半高, x2 - 半宽]
+    数据["bbox_coord_space"] = "abs_centralized"
+    数据["bbox_format"] = "yxyx"
+    try:
+        新正文 = json.dumps(数据, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError):
+        return 原文, notes
+    notes.append(f"Layout 自动中心化：{len(框表)} 个 bbox 按 W//2={半宽}、H//2={半高} 换算为 yxyx")
+    return f"尺寸：{宽}x{高}\n\n{MOSS分隔行}\n{新正文}", notes
+
+
+# ---------------------------------------------------------------------------
 # 通用
 # ---------------------------------------------------------------------------
 def 检查通用(text):

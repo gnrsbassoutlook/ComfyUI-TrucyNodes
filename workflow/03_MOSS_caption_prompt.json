@@ -1,0 +1,179 @@
+{
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "TrucyLLMLoader",
+      "pos": [
+        60,
+        140
+      ],
+      "size": [
+        380,
+        460
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LLM",
+          "type": "TRUCY_BRAIN",
+          "links": [
+            1
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TrucyLLMLoader"
+      },
+      "widgets_values": [
+        "gemma-4-e4b-it",
+        "本地GGUF",
+        "（不使用预设）",
+        "",
+        "lm-studio",
+        300,
+        "",
+        "Qwen3.8/Qwen3.8-27B-UD-IQ2_XXS.gguf",
+        "(无)",
+        8192,
+        -1,
+        512,
+        "关闭",
+        "medium",
+        "默认(不指定)",
+        "默认(不指定)",
+        "不开启"
+      ],
+      "title": "① LLM（按需改成 LM Studio / 远程API）"
+    },
+    {
+      "id": 2,
+      "type": "TrucyPromptH3QWI",
+      "pos": [
+        480,
+        140
+      ],
+      "size": [
+        460,
+        900
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "LLM",
+          "type": "TRUCY_BRAIN",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "文本",
+          "type": "STRING",
+          "links": [
+            2
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TrucyPromptH3QWI"
+      },
+      "widgets_values": [
+        "MOSS-Image（提示词增强）",
+        "MOSS·Caption",
+        "咖啡馆靠窗的座位，午后阳光斜切进来，木桌上摊开一本翻到中间的书、一杯拉花拿铁，杯壁有水汽，窗外是模糊的行道树。",
+        5.0,
+        "English",
+        0.7,
+        4096,
+        "",
+        "",
+        0,
+        false,
+        false,
+        0.0,
+        false,
+        "不指定",
+        "检查并记录（推荐）",
+        "Auto",
+        "",
+        "",
+        0,
+        0.0,
+        0,
+        1.0
+      ],
+      "title": "MOSS-Image Caption 增强（纯文本 → 长描述，无坐标）"
+    },
+    {
+      "id": 3,
+      "type": "TrucyTxtPreviewAndSave",
+      "pos": [
+        980,
+        140
+      ],
+      "size": [
+        400,
+        320
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "*",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "文本",
+          "type": "STRING",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TrucyTxtPreviewAndSave"
+      },
+      "widgets_values": [
+        false,
+        "C:\\output",
+        "scene_note",
+        "Pass_Prompt",
+        "UTF-8"
+      ],
+      "title": "③ 结果预览 / 落盘"
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "TRUCY_BRAIN"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "STRING"
+    ]
+  ],
+  "version": 0.4,
+  "definitions": {},
+  "extra": {}
+}

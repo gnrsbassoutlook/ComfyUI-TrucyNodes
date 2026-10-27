@@ -25,7 +25,7 @@ import sys
 try:
     from .trucy_llm import TrucyBrain, TrucyBrainError, TrucyLocalBrain, 扫描gguf文件
     from .trucy_quality import (
-        检查H3, 检查QWI, 检查通用, 修复H3, 修复QWI, 汇总, 提取引号文字,
+        检查H3, 检查QWI, 检查MOSS, 检查通用, 修复H3, 修复QWI, 修复MOSS, 汇总, 提取引号文字,
     )
     from .trucy_skills import (
         自动选择, 发现skills, 获取skill, 规范化内联文件, 构建skill系统提示词, 读取reference,
@@ -50,7 +50,7 @@ except ImportError:
     from trucy_llm import TrucyBrain, TrucyBrainError, TrucyLocalBrain, 扫描gguf文件  # noqa: E402
     from trucy_llm import KV缓存类型选项, FlashAttention模式选项  # noqa: E402
     from trucy_quality import (  # noqa: E402
-        检查H3, 检查QWI, 检查通用, 修复H3, 修复QWI, 汇总, 提取引号文字,
+        检查H3, 检查QWI, 检查MOSS, 检查通用, 修复H3, 修复QWI, 修复MOSS, 汇总, 提取引号文字,
     )
     from trucy_skills import (  # noqa: E402
         自动选择, 发现skills, 获取skill, 规范化内联文件, 构建skill系统提示词, 读取reference,
@@ -87,12 +87,27 @@ QWI任务说明 = {
     "T2I": "T2I（文生图：英文观察者视角单段长描述，另输出 wh_ratio）",
     "Edit": "Edit（图像编辑/多图合成：属性解耦 + <imageN> 标记 + ratio_follow）",
 }
-技能预设选项 = ["H3（MiniMax 视频提示词）", "Qwen-Image-2.1（图像提示词）"]
-# 合并任务下拉：Auto 为两家族通用，其余带家族前缀，避免歧义
+
+MOSS技能ID = "moss-image-prompt-enhancer"   # 官方 MOSS-Image Skill 目录名
+MOSS任务选项 = ["Caption", "Layout"]
+MOSS任务说明 = {
+    "Caption": "Caption（散文式图像长描述：主体/动作/环境/镜头/光线/材质/色调，可直接生图）",
+    "Layout": "Layout（像素布局：画布 16 倍数 + 扁平 items + 绝对像素 bbox，编译为一行 "
+              "yxyx 中心化 JSON，适合海报/多面板/精确文字排版）",
+}
+
+# 内置三家的 references 按任务精选加载；其余（第三方 / 自建）走全量兜底自动加载
+内置skillIDs = frozenset({H3技能ID, QWI技能ID, MOSS技能ID})
+第三方附录最多文件 = 6          # 单次最多注入的附录个数
+第三方附录单文件上限 = 24000     # 单个附录超过此字符数则整份跳过（避免半截规则误导模型）
+第三方附录总量上限 = 48000       # 一次注入的全部附录合计字符上限
+技能预设选项 = ["H3（MiniMax 视频提示词）", "Qwen-Image-2.1（图像提示词）", "MOSS-Image（提示词增强）"]
+# 合并任务下拉：Auto 为三家族通用，其余带家族前缀，避免歧义
 合并任务选项 = (
     ["Auto"]
     + [f"H3·{t}" for t in H3任务选项 if t != "Auto"]
     + [f"QWI·{t}" for t in QWI任务选项]
+    + [f"MOSS·{t}" for t in MOSS任务选项]
 )
 
 # 质量模式（连续性优先：默认只检查并记录日志，零打断；纠正为可选）
@@ -266,6 +281,70 @@ def _解析skill加载器(skill加载器, LLM, 用户文本):
         return skill
 
     return _自动选择skill(LLM, skill加载器.get("skills") or [], 用户文本)
+
+
+def _自动加载第三方附录(skill, 已选):
+    """第三方 / 自建 Skill 的 references 全量兜底加载。
+
+    内置三家（h3-prompt-writing / qwen-image-2-1-prompter / moss-image-prompt-enhancer）
+    各有按任务精选的附录表，不在此列——它们的附录大（ref-en 24KB），全量注入只会撑爆上下文。
+
+    第三方 Skill 则相反：SKILL.md 里常写「see references/xxx.md」，但单次推理没有文件系统，
+    不注入就等于模型永远看不到。这里按文件名顺序全量注入，并设三道闸：
+
+      - 最多 第三方附录最多文件 个（.md / .txt，yaml/json 等配置档跳过）
+      - 单个超过 第三方附录单文件上限 字符 → 整份跳过（不截断，避免半截规则误导模型）
+      - 合计超过 第三方附录总量上限 字符 → 停止后续文件
+
+    任何跳过都写日志，不打断流水线。
+    """
+    if "inline_content" in skill:
+        return []
+    if str(skill.get("id") or "") in 内置skillIDs:
+        return []
+
+    已选 = {str(x).replace("\\", "/").strip("/") for x in (已选 or [])}
+    候选 = [
+        p for p in skill.get("references", [])
+        if str(p).lower().endswith((".md", ".txt"))
+        and str(p).replace("\\", "/").strip("/") not in 已选
+    ]
+    if not 候选:
+        return []
+
+    块们 = []
+    总量 = 0
+    已装 = []
+    跳过 = []
+    for rel in 候选:
+        if len(已装) >= 第三方附录最多文件:
+            跳过.append(f"{rel}（已达 {第三方附录最多文件} 个文件上限）")
+            continue
+        try:
+            正文 = 读取reference(skill, rel)
+        except Exception as e:  # 缺文件 / 越界 / 编码问题都不该中断出稿
+            跳过.append(f"{rel}（读取失败：{e}）")
+            continue
+        if not str(正文 or "").strip():
+            跳过.append(f"{rel}（空文件）")
+            continue
+        if len(正文) > 第三方附录单文件上限:
+            跳过.append(f"{rel}（{len(正文)} 字符 > 单文件上限 {第三方附录单文件上限}）")
+            continue
+        if 总量 + len(正文) > 第三方附录总量上限:
+            跳过.append(f"{rel}（累计将超总量上限 {第三方附录总量上限} 字符）")
+            continue
+        总量 += len(正文)
+        已装.append(rel)
+        块们.append(f"===== {rel} =====\n{正文}")
+
+    if 已装:
+        _日志(f"提示词节点: 第三方 Skill「{skill.get('id')}」自动加载附录 {len(已装)} 份"
+              f"（{总量} 字符）：{', '.join(已装)}")
+    if 跳过:
+        _日志(f"提示词节点: 第三方 Skill 附录跳过 {len(跳过)} 份（不打断）："
+              f"{'; '.join(跳过)}")
+    return 块们
 
 
 # ---------------------------------------------------------------------------
@@ -888,9 +967,10 @@ class TrucyVLMRunner:
 class TrucyPromptH3QWI:
     """官方提示词 Skill + LLM → 结构化提示词。
 
-    skill_preset 下拉同时支持两套官方 Skill 家族：
+    skill_preset 下拉同时支持三套官方 Skill 家族：
       - H3（MiniMax H3 视频提示词，分镜/音效/配乐结构化输出）
       - Qwen-Image-2.1（阿里官方图像提示词重写，T2I / Edit）
+      - MOSS-Image（MOSS 官方 Prompt Enhancer：caption 长描述 / layout 像素排版）
     """
 
     @classmethod
@@ -978,16 +1058,20 @@ class TrucyPromptH3QWI:
                 "skill_preset": (技能预设选项, {
                     "default": 技能预设选项[0],
                     "tooltip": "H3 = MiniMax H3 视频提示词（分镜/音效/配乐）；"
-                               "Qwen-Image-2.1 = 阿里官方图像提示词重写（T2I/Edit）。",
+                               "Qwen-Image-2.1 = 阿里官方图像提示词重写（T2I/Edit）；"
+                               "MOSS-Image = MOSS 官方 Prompt Enhancer（caption 长描述 / layout 像素排版，"
+                               "坐标由模型自行中心化编译）。",
                 }),
                 "task_type": (合并任务选项, {
                     "default": "Auto",
-                    "tooltip": "Auto 两家族通用；H3·* 仅 H3 预设用，QWI·* 仅 Qwen-Image-2.1 预设用"
-                               "（选错会自动纠正为 Auto）。",
+                    "tooltip": "Auto 三家族通用；H3·* 仅 H3 预设用，QWI·* 仅 Qwen-Image-2.1 预设用，"
+                               "MOSS·Caption/Layout 仅 MOSS-Image 预设用（选错会自动纠正为 Auto）。",
                 }),
                 "scene_direction": ("STRING", {
                     "default": "", "multiline": True,
-                    "tooltip": "导演指令 / 创意描述。例如: 镜头从窗外缓慢推入，角色转身说“时间到了”。",
+                    "tooltip": "导演指令 / 创意描述，一句话就能跑。例如: 镜头从窗外缓慢推入，角色转身说“时间到了”。\n"
+                               "纯文本任务（H3·T2VA / QWI·T2I / MOSS·Caption）不需要连接任何素材，"
+                               "9 个参考图与 3 个参考音频槽位全部可选、留空即可。",
                 }),
                 "duration": ("FLOAT", {
                     "default": 5.0, "min": 4.0, "max": 15.0, "step": 0.5,
@@ -1016,7 +1100,10 @@ class TrucyPromptH3QWI:
             _日志("提示词节点: 上游 LLM 节点被静音（ExecutionBlocker），返回空输出——"
                   "取消静音或改接 LLM 后重跑")
             return ("",)
-        图像模式 = str(skill_preset).startswith("Qwen")
+        预设 = str(skill_preset or "")
+        图像模式 = 预设.startswith("Qwen")          # Qwen-Image-2.1 家族
+        MOSS模式 = 预设.startswith("MOSS")          # MOSS-Image 家族
+        图像类模式 = 图像模式 or MOSS模式           # 非 H3：不吃时长/分镜/画幅约束
         镜头数 = int(shot_count) if str(shot_count).isdigit() else 0
         质量模式 = str(quality_mode or 质量模式选项[0])
         try:
@@ -1029,7 +1116,7 @@ class TrucyPromptH3QWI:
         # 强制单镜锁 1 镜；超健康区只记日志钳制，绝不报错不打断。
         生效时长 = float(duration)
         单镜模式 = False
-        if not 图像模式:
+        if not 图像类模式:
             if bool(上游约束生效):
                 if 上游时长 > 0:
                     生效时长 = 上游时长
@@ -1052,55 +1139,83 @@ class TrucyPromptH3QWI:
         # 编号保留槽位号从 1 起，与下游多参 text encoder 一一对应，不重编号）
         图片条目 = 收集图片(kwargs, 最长边=参考图最长边 or None)
         视频条目 = []  # 视频参考端口已摘除（99.99% 不用）；媒体层后端保留，加一行即复活
-        if 图像模式:
+        if 图像类模式:
+            家族名 = "Qwen-Image-2.1" if 图像模式 else "MOSS-Image"
             音频条目 = []
             if 已连接音频(kwargs):
-                _日志("提示词节点: Qwen-Image-2.1 为图像提示词 Skill，参考音频槽位已忽略")
+                _日志(f"提示词节点: {家族名} 为图像提示词 Skill，参考音频槽位已忽略")
             if bool(上游约束生效) or 上游时长 > 0 or bool(强制单镜) \
                     or str(画面比例 or 画面比例选项[0]) != 画面比例选项[0]:
                 _日志("提示词节点: 上游约束（总闸/指定时长/强制单镜）与画面比例均为 H3 视频模式参数，"
-                      "Qwen-Image-2.1 模式下已忽略（QWI 只认参考图输入）")
+                      f"{家族名} 模式下已忽略（只认参考图输入）")
         else:
             音频条目 = 收集音频(kwargs)
-        素材清单 = 构建素材清单(图片条目, 视频条目, 音频条目, 图像模式)
-        媒体部分 = 构建媒体部分(图片条目, 视频条目, 音频条目, 图像模式)
+        素材清单 = 构建素材清单(图片条目, 视频条目, 音频条目, 图像类模式)
+        媒体部分 = 构建媒体部分(图片条目, 视频条目, 音频条目, 图像类模式)
 
         # 0. 任务类型规范化：剥离家族前缀；跨家族选择时纠正为 Auto
         任务 = str(task_type or "Auto").strip()
-        if 任务.startswith("H3·"):
-            任务 = 任务[len("H3·"):]
-            if 图像模式:
-                _日志(f"提示词节点: 预设为 Qwen-Image-2.1，任务 {task_type} 不适用，改用 Auto")
-                任务 = "Auto"
-        elif 任务.startswith("QWI·"):
-            任务 = 任务[len("QWI·"):]
-            if not 图像模式:
-                _日志(f"提示词节点: 预设为 H3，任务 {task_type} 不适用，改用 Auto")
-                任务 = "Auto"
-        if 图像模式 and 任务 not in QWI任务选项 + ["Auto"]:
-            任务 = "Auto"
-        if not 图像模式 and 任务 not in H3任务选项:
+        当前家族 = "QWI" if 图像模式 else ("MOSS" if MOSS模式 else "H3")
+        for 前缀, 家族 in (("H3·", "H3"), ("QWI·", "QWI"), ("MOSS·", "MOSS")):
+            if 任务.startswith(前缀):
+                任务 = 任务[len(前缀):]
+                if 家族 != 当前家族:
+                    _日志(f"提示词节点: 预设为 {当前家族} 家族，任务 {task_type} 不适用，改用 Auto")
+                    任务 = "Auto"
+                break
+        合法任务 = {
+            "H3": H3任务选项,
+            "QWI": QWI任务选项 + ["Auto"],
+            "MOSS": MOSS任务选项 + ["Auto"],
+        }[当前家族]
+        if 任务 not in 合法任务:
             任务 = "Auto"
 
+        # 0.1 纯文本任务提示：T2VA / T2I / Caption 三类不依赖任何素材，
+        # 素材槽位本就全部可选；若手上仍连着图或音频，只记一行日志说明去向，
+        # 既不改变行为也不打断流水线。
+        纯文本任务 = (
+            (当前家族 == "H3" and 任务 == "T2VA")
+            or (当前家族 == "QWI" and 任务 == "T2I")
+            or (当前家族 == "MOSS" and 任务 == "Caption")
+        )
+        if 纯文本任务 and (图片条目 or 音频条目):
+            _日志(f"提示词节点: 任务 {当前家族}·{任务} 属纯文本任务，但仍检测到 "
+                  f"{len(图片条目)} 张参考图 / {len(音频条目)} 段音频，已按素材一并发送；"
+                  "如需纯文本效果请断开对应槽位")
+        elif 纯文本任务:
+            _日志(f"提示词节点: 纯文本任务 {当前家族}·{任务}（零素材输入）")
+
         # 1. 确定 Skill
-        if 图像模式:
-            # QWI 模式：只接受 qwen-image-2-1-prompter（或临时内联文件），
-            # H3 风格 Skill（3D动画/品牌宣传等）不适用，自动忽略
+        if 图像类模式:
+            # 图像家族：只接受同家族 Skill（前缀匹配，含自装/第三方）或临时内联文件；
+            # 跨家族（H3 风格或另一图像家族）不适用，自动忽略并回退内置
+            内置ID = QWI技能ID if 图像模式 else MOSS技能ID
+            内置名 = "Qwen-Image-2.1" if 图像模式 else "MOSS-Image"
+            家族前缀 = "qwen-image" if 图像模式 else "moss"
+            家族任务说明 = QWI任务说明 if 图像模式 else MOSS任务说明
             skill = None
             if skill加载器:
                 loaded = _解析skill加载器(
                     skill加载器, LLM,
-                    f"{QWI任务说明.get(任务, 任务)} {scene_direction}".strip()
+                    f"{家族任务说明.get(任务, 任务)} {scene_direction}".strip()
                 )
-                if loaded is not None and (loaded.get("id") == QWI技能ID or "inline_content" in loaded):
+                # 家族匹配用前缀而非精确 id：同家族的自装/第三方 Skill 也能直接选用
+                # （如 qwen-image-edit-system-prompt / qwen-image-t2i-system-prompt），
+                # 只有跨家族（H3 风格 skill 塞进图像模式）才忽略
+                if loaded is not None and (
+                    "inline_content" in loaded
+                    or str(loaded.get("id") or "").lower().startswith(家族前缀)
+                ):
                     skill = loaded
                 elif loaded is not None:
-                    _日志(f"提示词节点: Skill「{loaded.get('id')}」不适用于 Qwen-Image-2.1 模式，改用内置 {QWI技能ID}")
+                    _日志(f"提示词节点: Skill「{loaded.get('id')}」不属于 {内置名} 家族"
+                          f"（需以 {家族前缀} 开头），改用内置 {内置ID}")
             if skill is None:
-                skill = 获取skill(QWI技能ID)
+                skill = 获取skill(内置ID)
             if skill is None:
                 raise ValueError(
-                    f"未找到 {QWI技能ID} Skill。请确认本插件 skills/ 目录存在。"
+                    f"未找到 {内置ID} Skill。请确认本插件 skills/ 目录存在。"
                 )
         else:
             # H3 模式：优先 skill加载器（可换 llama-TE 风格 Skill），其次内置 h3-prompt-writing
@@ -1118,13 +1233,24 @@ class TrucyPromptH3QWI:
 
         # 2. 组装系统提示词：Skill 正文 + 按任务类型按需加载的 reference
         extra_blocks = []
+        want_refs = []
         if "inline_content" not in skill:
             if 图像模式:
-                # Auto 不预加载——SKILL.md 自带 T2I/Edit 意图路由图，让模型自己判断
+                # Auto 时按「有没有参考图」替模型判定模式——节点本来就知道，比让模型
+                # 从措辞里猜更可靠，也让 Auto 与显式选 T2I/Edit 拿到同样的附录支持
+                附录任务 = 任务
+                if 任务 == "Auto":
+                    附录任务 = "Edit" if 图片条目 else "T2I"
+                    _日志(f"提示词节点: QWI 任务 Auto → 按素材判定为 {附录任务}"
+                          f"（{len(图片条目)} 张参考图），预加载对应附录")
                 want_refs = {
                     "T2I": ["references/t2i_rules.md", "references/cheat_sheet.md"],
                     "Edit": ["references/edit_rules.md", "references/cheat_sheet.md"],
-                }.get(任务, [])
+                }.get(附录任务, [])
+            elif MOSS模式:
+                # Layout/Auto 才需要坐标系与字段白名单；Caption 全靠 SKILL.md 自足
+                want_refs = ["references/compile-rules.md", "references/layout.md"] \
+                    if 任务 in ("Layout", "Auto") else []
             else:
                 want_refs = []
                 if 任务 == "Ref2VA":
@@ -1134,9 +1260,16 @@ class TrucyPromptH3QWI:
             for wr in want_refs:
                 if wr in skill.get("references", []):
                     extra_blocks.append(f"===== {wr} =====\n{读取reference(skill, wr)}")
+        # 第三方 / 自建 Skill：references 全量兜底注入（内置三家不在此列）
+        第三方块 = _自动加载第三方附录(skill, want_refs)
+        extra_blocks.extend(第三方块)
         if 图像模式:
             base_system = ("你是阿里巴巴 Qwen-Image-2.1 官方图像提示词重写专家，严格按照当前 Skill 及其 "
                            "references 的规则输出，最终提示词必须可直接用于 Qwen-Image-2.1 生图/编辑。")
+        elif MOSS模式:
+            base_system = ("你是 MOSS-Image 官方提示词增强（Prompt Enhancer）专家，严格按当前 Skill 的"
+                           "字段白名单、画布规则与输出契约作答。Layout 的方框中心化换算必须由你自己完成"
+                           "（减去 W//2、H//2，顺序 y1,x1,y2,x2），最终结果要能直接粘贴给 MOSS-Image。")
         else:
             base_system = ("你是 MiniMax H3 官方视频提示词编写专家，严格按照当前 Skill 及其 references 的 "
                            "字段名、章节顺序、标签与时间格式输出。")
@@ -1177,6 +1310,44 @@ class TrucyPromptH3QWI:
                 "第一行输出「宽高比：<wh_ratio 或 ratio_follow>」，",
                 "空一行后输出「===== PROMPT =====」，",
                 "之后只放最终提示词纯文本（单段，无 JSON、无解释、无微调建议）。",
+            ]
+        elif MOSS模式:
+            parts.append(f"任务类型：{MOSS任务说明.get(任务, 任务)}")
+            ratio = str(aspect_ratio or "").strip()
+            if ratio:
+                parts.append(f"目标宽高比：{ratio}（Layout 据此选择 16 倍数的像素画布；"
+                             "比例字样禁止写进 JSON 或 caption）")
+            elif 任务 in ("Layout", "Auto"):
+                parts.append("目标画布：未指定，按 Skill 里的常见画布表选合适尺寸（宽高均为 16 倍数）。")
+            规则 = ["只输出最终提示词：不解释过程、不给备选方案、不写 draft 文件、不调用任何脚本。"]
+            if 任务 in ("Layout", "Auto"):
+                规则.append(
+                    "Layout 的坐标换算必须由你完成：v1=floor(y1)-H//2、v2=floor(x1)-W//2、"
+                    "v3=ceil(y2)-H//2、v4=ceil(x2)-W//2，输出顺序 [v1,v2,v3,v4]（y 在前、x 在后）；"
+                    "负值表示位于画面中心左上，属正常结果，严禁钳到 0 或改成正数。")
+                规则.append(
+                    "Layout 根字段只允许 summary / items / bbox_coord_space / bbox_format，"
+                    "bbox_coord_space=\"abs_centralized\"、bbox_format=\"yxyx\"；"
+                    "画布宽高为 16 的正整数倍，且不得写进 JSON 内部。")
+            规则.append("用户引号内的文字逐字保留（text 字段或 caption 引用），不翻译、不改写、不增删标点。")
+            规则.append("禁止 8K / 4K / masterpiece / highly detailed / award-winning 一类空话质量词。")
+            if str(constraints or "").strip():
+                规则.append(f"硬性要求（必须遵守）：{str(constraints).strip()}")
+            parts.append("【本次调用硬性规则】")
+            parts += [f"{i}. {r}" for i, r in enumerate(规则, 1)]
+            parts += ["", "创意描述 / 用户需求：", str(scene_direction or "").strip() or "（未提供，请自行发挥）"]
+            if str(reference_context or "").strip():
+                parts += ["", "参考素材补充（身份/关系等事实）：", str(reference_context).strip()]
+            if str(vision_context or "").strip():
+                parts += ["", "以下是对参考图片的视觉分析（vision context）：", str(vision_context).strip()]
+            if 图片条目:
+                parts += ["", 素材清单]
+            parts += [
+                "",
+                "输出格式：Caption 直接给散文长描述（无标题、无前缀、无 JSON）；",
+                "Layout 第一行「尺寸：WxH」，空一行后给分隔行（五个等号 + 空格 + PROMPT + 空格 + 五个等号，"
+                "与 Skill 的 Output contract 完全一致），之后只放一行紧凑 JSON"
+                "（summary/items/bbox_coord_space/bbox_format）。",
             ]
         else:
             lang_line = "输出语言：英文（对话、歌词、画面文字保留原文）。" if output_language == "English" \
@@ -1229,7 +1400,8 @@ class TrucyPromptH3QWI:
             {"role": "system", "content": system_text},
             {"role": "user", "content": user_text},
         ]
-        _日志(f"提示词节点 → {LLM.describe()} | preset={'QWI' if 图像模式 else 'H3'}"
+        预设名 = "QWI" if 图像模式 else ("MOSS" if MOSS模式 else "H3")
+        _日志(f"提示词节点 → {LLM.describe()} | preset={预设名}"
               f" | skill={skill['id']} | task={任务} | images={len(图片条目)}"
               f" audios={len(音频条目)}")
         content, usage = LLM.chat(
@@ -1250,6 +1422,10 @@ class TrucyPromptH3QWI:
                             is_edit=(任务 == "Edit" or (任务 == "Auto" and bool(图片条目))),
                             image_count=len(图片条目), 必须保留文字=提取引号文字(scene_direction))
                 prompt, notes = 修复QWI(prompt)
+            elif MOSS模式:
+                # 先确定性修复再检查：小模型常忘做中心化，纯算术不该指望它算准
+                prompt, notes = 修复MOSS(prompt, mode=任务 if 任务 in MOSS任务选项 else "Auto")
+                问题 = 检查MOSS(prompt, mode=任务 if 任务 in MOSS任务选项 else "Auto")
             else:
                 问题 = 检查H3(prompt, duration=生效时长, shot_count=镜头数,
                            task_type=任务, 图片数=len(图片条目),
@@ -1286,6 +1462,9 @@ class TrucyPromptH3QWI:
                                      is_edit=(任务 == "Edit" or (任务 == "Auto" and bool(图片条目))),
                                      image_count=len(图片条目), 必须保留文字=提取引号文字(scene_direction))
                         prompt2, notes2 = 修复QWI(prompt2)
+                    elif MOSS模式:
+                        prompt2, notes2 = 修复MOSS(prompt2, mode=任务 if 任务 in MOSS任务选项 else "Auto")
+                        问题2 = 检查MOSS(prompt2, mode=任务 if 任务 in MOSS任务选项 else "Auto")
                     else:
                         问题2 = 检查H3(prompt2, duration=生效时长, shot_count=镜头数,
                                      task_type=任务, 图片数=len(图片条目),

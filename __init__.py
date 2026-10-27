@@ -50,6 +50,7 @@ def _safe_import(module_name, class_names):
 #                          Skill Runner Trucy 家族（Skill Loader / Chat / Prompt / Unload）；
 #                          VLM Runner Trucy（图片/视频推理，独立类目）
 #   trucy_ref2v.py        —— H3 ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
+#   trucy_dmad.py         —— H3 4 步加速采样器（DMAD 蒸馏 LoRA 专用推理步，替代 KSamplerSelect）
 (TrucyLLMLoader, TrucySkillLoader, TrucyChat, TrucyPromptH3QWI, TrucyUnloadModel) = _safe_import(
     "trucy_skill_runner",
     ["TrucyLLMLoader", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
@@ -59,6 +60,7 @@ def _safe_import(module_name, class_names):
     "trucy_ref2v",
     ["TrucyH3RefEncode", "TrucyH3PromptEncode", "TrucyH3RefToVideo"],
 )
+(TrucyDMADSampler,) = _safe_import("trucy_dmad", ["TrucyDMADSampler"])
 
 NODE_CLASS_MAPPINGS = {
     "TrucyAudioLoaderIndex": TrucyAudioLoaderIndex,
@@ -120,6 +122,8 @@ optional_nodes = {
     "TrucyH3RefEncode": TrucyH3RefEncode,
     "TrucyH3PromptEncode": TrucyH3PromptEncode,
     "TrucyH3RefToVideo": TrucyH3RefToVideo,
+    # H3 4 步加速采样器（DMAD 蒸馏 LoRA 专用推理步）
+    "TrucyDMADSampler": TrucyDMADSampler,
 }
 for name, cls in optional_nodes.items():
     if cls is not None:
@@ -172,7 +176,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Skill Runner Trucy 节点族（真正的 Skill 执行器）
     "TrucySkillLoader": "🚀 Skill Loader Trucy",
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
-    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
+    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI/MOSS)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
     # VLM Runner Trucy（图片/视频推理，独立类目）
     "TrucyVLMRunner": "🚀 VLM Runner Trucy",
@@ -180,6 +184,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyH3RefEncode": "🚀 H3 ref2v Trucy · 参考编码（缓存层）",
     "TrucyH3PromptEncode": "🚀 H3 ref2v Trucy · 提示词编码（出口）",
     "TrucyH3RefToVideo": "🚀 H3 ref2v Trucy · 参考转视频（合并版）",
+    "TrucyDMADSampler": "🚀 Trucy DMAD Sampler (H3 4步)",
 }
 
 WEB_DIRECTORY = "./web"

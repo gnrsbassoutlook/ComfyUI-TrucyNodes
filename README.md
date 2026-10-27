@@ -10,6 +10,14 @@ ComfyUI-TrucyNodes is a professional toolkit designed for AI cinematography work
 
 ---
 
+### [2026-10-27] Third prompt family: MOSS-Image official Prompt Enhancer
+🎨 **New `MOSS-Image（提示词增强）` preset** — the Prompt node's skill preset grows from two families to three, adding MOSS's official `moss-image-prompt-enhancer` (bundled at `skills/moss-image-prompt-enhancer/`). Task dropdown gains **MOSS·Caption / MOSS·Layout**:
+*   **Caption**: expands a one-line idea into a long descriptive paragraph (subject/action/setting/camera/light/materials/palette), ready to paste into an image model, with no field wrapper.
+*   **Layout**: pixel-level layout control — canvas dimensions as multiples of 16, a flat `items` array and absolute-pixel boxes. Built for posters, multi-panel designs and precise text placement.
+📐 **The model does the coordinate math** — upstream ships "write draft.json → run compile_prompt.py", but the node has no shell, so the rules are internalized in the Skill and its references: `v1=floor(y1)−H//2`, `v2=floor(x1)−W//2`, `v3=ceil(y2)−H//2`, `v4=ceil(x2)−W//2`, emitted as `y,x,y,x` with negative values meaning "left of / above centre" (never clamped to zero). Layout output puts `尺寸：WxH` on the first line (a generation parameter, never inside the prompt) and a single compact JSON line after the separator.
+🛡️ **New MOSS quality checks (zero interruption)** — out-of-bounds boxes, swapped axis order, missing centering, non-multiple-of-16 canvases, illegal root fields and JSON leaked into Caption mode all get logged while the output keeps flowing downstream.
+⚙️ **Zero impact on existing workflows** — presets and tasks are additive enum values; the previous `H3（…）` / `Qwen-Image-2.1（…）` options are untouched, and a cross-family task selection self-corrects to Auto with a log line.
+
 ### [2026-10-17] Executor Cleanup: Generic VLM Labels + Sampling Fine-Tuning + llama.cpp Speed Knobs
 🏷️ **VLM Runner labels are now generic** — connected images are tagged **图片1 … 图片8** and the video **视频1** inside the node, and the prompt asks for per-image descriptions. The H3/QWI tag dropdown is gone from this node (it never belonged to a skill workflow); Chat/Prompt keep their skill-family tag logic.
 🛡️ **Null-safety on every media input** — all 8 image slots and the video port skip empty / muted / broken inputs with a log line (video mode with nothing usable gives a clear designed error, never a raw traceback).
@@ -42,7 +50,7 @@ Smart Blockers: Features built-in disable_out boolean toggles powered by ComfyUI
 
 ## 🚀 Core Modules
 
-**50 nodes in total.** Categories in the ComfyUI menu: `TrucyNodes/Logic`, `/Image`, `/Toolkit`, `/Text`, `/Excel`, `/Audio`, `/Video`, `/LLM Loader`, `/Skill Runner`, `/VLM Runner`, `/ref2v`.
+**51 nodes in total.** Categories in the ComfyUI menu: `TrucyNodes/Logic`, `/Image`, `/Toolkit`, `/Text`, `/Excel`, `/Audio`, `/Video`, `/LLM Loader`, `/Skill Runner`, `/VLM Runner`, `/ref2v`, plus `sampling/custom_sampling/samplers` (the DMAD sampler below).
 
 ### 1. Logic & Flow Control
 *   **Trucy For Loop (Start / End, 9ch / 2ch)**: High-performance recursive loop system.
@@ -103,7 +111,9 @@ The real skill-executor family: **LLM Loader → Skill Loader → Chat / Prompt 
 
 *   **🚀 Skill Loader Trucy**: scans the bundled `skills/` (plus `comfyUI-llama-TE/skills` when present); fix one skill or let the brain auto-pick.
 *   **🚀 Skill Runner Trucy · Chat**: brain + skill + prompt → text, with **12 reference slots** (🖼️ images 1-9 / 🎵 audio 1-3). Empty slots are skipped and logged, never crash the pipeline. (The old generic `图片` port is gone — the 9 image slots cover it with exact numbering.)
-*   **🚀 Skill Runner Trucy · Prompt (H3/QWI)**: two official prompt-skill families in one node — **H3** (MiniMax video prompts, `[Shot N]` storyboards with soundscape/music) and **Qwen-Image-2.1** (image prompt rewriting). Quality layer checks output and logs issues with **zero pipeline interruption** (optional one-shot auto-repair, off by default).
+*   **🚀 Skill Runner Trucy · Prompt (H3/QWI/MOSS)**: three official prompt-skill families in one node — **H3** (MiniMax video prompts, `[Shot N]` storyboards with soundscape/music), **Qwen-Image-2.1** (image prompt rewriting) and **MOSS-Image** (official Prompt Enhancer: Caption prose / Layout pixel boxes, with the model compiling the centering math itself). Quality layer checks output and logs issues with **zero pipeline interruption** (optional one-shot auto-repair, off by default).
+*   **🧩 Third-party skills work as-is**: drop any skill folder from GitHub into `skills/`, refresh the page, and it shows up in `Skill Loader` — no appendix merging, no restart. Three rules: ① the three built-in families load `references` selectively per task, while third-party skills get **every appendix auto-injected** (max 6 files, ≤24 000 chars each, ≤48 000 chars total; anything over is skipped with a log line, never truncated); ② image presets accept same-family skills (`qwen-image*` / `moss*` prefix) and fall back to the built-in only on a cross-family pick; ③ the H3 preset accepts any skill. To try one without writing to disk, paste it into the Loader's inline-file fields.
+    **Text-only works too**: all 9 image and 3 audio slots are optional, so `H3·T2VA` / `QWI·T2I` / `MOSS·Caption` run with **no reference material at all** — one rough sentence in, a finished prompt out. The `workflow/` folder ships three minimal graphs (LLM Loader → Prompt → Text Preview & Save, no diffusion/CLIP/VAE); drag them in or open them from the *Trucy Prompt* group in the sidebar.
 *   **🚀 Skill Runner Trucy · Unload Model**: frees local GGUF VRAM before sampling; attach its wildcard `upstream` input to the prompt node's output.
 *   **Sampling fine-tuning** (Chat / Prompt / VLM Runner, every default = "not set, not sent"): `top_p` / `seed` are standard OpenAI request fields (local + LM Studio + remote); `top_k` / `repeat_penalty` are llama.cpp-native (local + LM Studio; strict APIs ignore them, and a 400 rejection triggers an automatic drop-and-retry); `保留思考过程` is Local-GGUF-thinking only. See section 8 for the full breakdown.
 *   **Unload after inference** (on all three executors — Chat / Prompt / VLM Runner, off by default): Local GGUF only — automatically unloads the model after inference to hand VRAM back (the next inference reloads it, slightly slower). When several executors share one LLM Loader, enable it on the last one; or keep using the dedicated Unload Model node. No effect on remote APIs / LM Studio (the model isn't local).
@@ -134,7 +144,26 @@ Reference-to-video conditioning for the official MiniMax H3 pipeline, in two int
 
 Both forms reuse the official helpers (`_resize` / `_encode_ref_audio` / `_empty_av_latent`), follow the official `<Picture N>` / `<Audio N>` tag scheme (slot numbers are 1-based here vs `ref_image_0` officially — purely a kwargs key name, results are identical), and are null-safe end to end. Video reference ports were removed by decision (use the official `MiniMaxH3ReferenceToVideo` node if ever needed; the collection backend stays dormant in `trucy_media.py`).
 
----
+### 10. MOSS-Image Prompt Enhancer (third prompt family, bundled Skill)
+
+The `skills/moss-image-prompt-enhancer` folder from the official `OpenMOSS/MOSS-Image` repo ships verbatim under `skills/` and backs the **`MOSS-Image（提示词增强）`** preset on the Prompt node, with two tasks:
+
+*   **MOSS·Caption**: one rough idea → a long descriptive paragraph (subject / action / setting / camera / light / materials / palette), ready to paste into any image model, **with no field wrapper**.
+*   **MOSS·Layout**: pixel-level layout control (the "put this exactly there" ability, Ideogram-style) — a canvas whose width/height are multiples of 16, a flat `items` array and absolute-pixel boxes, for posters, multi-panel designs and precise text placement.
+
+**Output contract (Layout)**: line one is `尺寸：WxH` (a generation parameter, **never part of the prompt**) → blank line → `===== PROMPT =====` → after the separator, **a single compact JSON line** whose only root fields are `summary` / `items` / `bbox_coord_space` / `bbox_format` (the last two fixed to `abs_centralized` / `yxyx`).
+
+**The model does the coordinate math, not you**: upstream ships "write draft.json → run compile_prompt.py", but the node has no shell and no filesystem, so the rules are internalized in the Skill and `references/compile-rules.md` — `v1=floor(y1)−H//2`, `v2=floor(x1)−W//2`, `v3=ceil(y2)−H//2`, `v4=ceil(x2)−W//2`, emitted as `y1,x1,y2,x2`; **negative values mean "left of / above centre" and are correct — never clamp them to zero**.
+
+**Quality layer (zero interruption, same switch as H3/QWI)**:
+*   Missing centering — the node applies a **deterministic fix**: if every box is non-negative and inside the canvas, it is treated as "raw top-left pixels were written" and the centre is subtracted (idempotent; re-running changes nothing). Mixed state (some negatives already) or out-of-bounds boxes are reported, never guessed.
+*   Log-only issues: canvas not a multiple of 16, missing `尺寸：` line, missing `===== PROMPT =====`, unparsable JSON, illegal or missing root fields, wrong `bbox_coord_space` / `bbox_format`, out-of-bounds boxes, swapped order (xyxy), JSON leaked into Caption mode, and filler words such as 8K / masterpiece.
+
+**How to run it**:
+*   **Text-only is enough**: all 9 image and 3 audio slots are optional — connect nothing. `workflow/03_MOSS_caption_prompt.json` is a ready minimal graph (LLM Loader → Prompt → Text Preview & Save).
+*   **Sampling**: Caption 0.6–0.8 / max_tokens ≥2048; Layout 0.4–0.6 / ≥4096 (Layout is a long JSON body — high temperature drops `items` or skews bboxes, and the quality layer will flag it).
+*   **Same-family skills are swappable**: any `moss*`-prefixed skill of your own or from third parties binds to the MOSS preset; H3-style or `qwen-image*` skills are ignored with a fallback to the built-in (cross-family picks only get a log line).
+*   **MOSS is a text-to-image Skill** with no image-editing task. Connected reference images are still sent along with the material list, but the official Skill defines no edit semantics — to modify an image use `Qwen-Image-2.1 · Edit`.
 
 ## 🛠️ Installation
 1. `cd custom_nodes`
@@ -232,6 +261,8 @@ Local ground rules:
 |---|---|---|---|
 | H3 video prompt | 0.3–0.5 | ≥ 4096 | Structured output wants stability — low temp keeps storyboards in line |
 | QWI image prompt | 0.5–0.7 | ≥ 4096 | — |
+| MOSS Caption | 0.6–0.8 | ≥ 2048 | Long prose, needs room to develop |
+| MOSS Layout | 0.4–0.6 | ≥ 4096 | Many JSON fields; high temperature drops items/bbox — the quality layer flags bad coordinates |
 | VLM image/video description | 0.3–0.5 | 2048–4096 | Descriptions must be accurate — don't let the model improvise |
 | Chat / creative talk | 0.8–1.0 | 4096 | More divergence, more ideas — and more drift |
 

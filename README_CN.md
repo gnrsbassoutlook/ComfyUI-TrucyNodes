@@ -10,6 +10,14 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ---
 
+### [2026-10-27] 提示词节点新增 MOSS-Image 家族：官方 Prompt Enhancer 预设
+🎨 **MOSS-Image（提示词增强）预设**——`🚀 Skill Runner Trucy · Prompt` 的技能预设从两家族扩到三家族，新增 MOSS 官方 `moss-image-prompt-enhancer`（内置 `skills/moss-image-prompt-enhancer/`）。任务下拉出现 **MOSS·Caption / MOSS·Layout**：
+*   **Caption**：把一句创意扩写成长描述散文（主体/动作/环境/镜头/光线/材质/色调），可直接生图，不带任何字段包装。
+*   **Layout**：像素级版面控制（类似 Ideogram 那类"指定哪块放什么"的能力）——画布宽高 16 的倍数 + 扁平 `items` + 绝对像素 bbox，用于海报、多面板、精确文字排版。
+📐 **坐标由模型自己算，不用你手算**——官方 Skill 原本是"写 draft.json → 跑 compile_prompt.py"，节点里没有 shell，所以这套换算已内化进 Skill 与 references：`v1=floor(y1)−H//2`、`v2=floor(x1)−W//2`、`v3=ceil(y2)−H//2`、`v4=ceil(x2)−W//2`，输出顺序 `y,x,y,x`，负值表示位于中心左上（正常，禁止钳零）。Layout 输出第一行给 `尺寸：WxH`（生成参数，不进提示词），分隔行后只放一行紧凑 JSON。
+🛡️ **新增 MOSS 质量检查（零打断）**——框越界、顺序写反（yxyx→xyxy）、忘做中心化、画布非 16 倍数、JSON 多带非法字段、Caption 误输出 JSON，一律只记日志并照常流向下游。
+⚙️ **老工作流零影响**——预设与任务都是新增枚举值，原有 `H3（…）`/`Qwen-Image-2.1（…）` 选项原封不动；跨家族任务选错会自动纠正为 Auto 并记日志。
+
 ### [2026-10-17] 执行节点大清整：VLM 通用标签 + 采样微调 + llama.cpp 提速控件
 🏷️ **VLM Runner 标签改通用口径**——接入的图片在节点内部按 **图片1…图片8** 指代、视频按 **视频1** 指代，提示词要求模型分别描述每张图片。该节点的 H3/QWI 标签下拉已删除（它压根不进 Skill 家族工作流）；Chat / Prompt 的 Skill 家族标签逻辑保留不动。
 🛡️ **媒体输入空值不崩全覆盖**——8 个图槽 + 1 个视频口，空置 / 上游被静音 / 零尺寸 / 坏路径 / 认不出的对象一律跳过记日志（视频模式下无可用的东西时报设计内的清晰错误），绝不抛原始异常、绝不发空提示词。
@@ -41,7 +49,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ## 🚀 核心模块详述
 
-**共 50 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/LLM Loader`、`/Skill Runner`、`/VLM Runner`、`/ref2v`。
+**共 51 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/LLM Loader`、`/Skill Runner`、`/VLM Runner`、`/ref2v`，外加 `sampling/custom_sampling/samplers`（下面的 DMAD 采样器）。
 
 ### 1. 逻辑与流程控制 (Logic 系列)
 *   **Trucy For Loop (Start / End, 9路 / 2路)**: 逻辑核心。
@@ -102,7 +110,9 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 *   **🚀 Skill Loader Trucy**：扫描内置 `skills/`（及 `comfyUI-llama-TE/skills`，存在时自动兼容）；可固定选一个，也可交给大脑自动匹配。
 *   **🚀 Skill Runner Trucy · Chat**：大脑 + Skill + 提示词 → 文本，带 **12 个参考素材槽位**（🖼️ 图1-9 / 🎵 音1-3）。空槽位跳过并记日志，绝不卡流水线。（旧版通用「图片」端口已删除——9 个编号图槽全覆盖，老工作流里连它的线需改一次。）
-*   **🚀 Skill Runner Trucy · Prompt (H3/QWI)**：两套官方提示词 Skill 一个节点搞定——**H3**（MiniMax 视频提示词，`[Shot N]` 分镜 + 音效/配乐）与 **Qwen-Image-2.1**（图像提示词重写）。质量层只检查记日志、**零打断**（可选一次自动纠正，默认关）。
+*   **🚀 Skill Runner Trucy · Prompt (H3/QWI/MOSS)**：三套官方提示词 Skill 一个节点搞定——**H3**（MiniMax 视频提示词，`[Shot N]` 分镜 + 音效/配乐）、**Qwen-Image-2.1**（图像提示词重写）、**MOSS-Image**（官方 Prompt Enhancer：Caption 长描述 / Layout 像素版面，坐标由模型自行中心化编译）。质量层只检查记日志、**零打断**（可选一次自动纠正，默认关）。
+*   **🧩 第三方 Skill 可直接用**：把 GitHub 上拿到的 skill 目录整个丢进 `skills/`，刷新页面即出现在 `Skill Loader` 下拉，**不需要合并附录、不需要重启**。规则有三条：① 内置三家的 `references` 按任务精选加载，第三方则**全量自动兜底注入**（最多 6 份、单份 ≤24000 字符、合计 ≤48000 字符，超限跳过并记日志，绝不截断）；② 图像预设允许同家族 skill（`qwen-image*` / `moss*` 前缀），跨家族才回退内置；③ H3 预设不设限，任意 skill 都能挂。想临时试一份不落盘，用 Loader 的「加载文件内容」直接粘。
+    **纯文本同样能用**：9 个参考图 + 3 个参考音频槽位全部为 optional，`H3·T2VA` / `QWI·T2I` / `MOSS·Caption` 三类任务**不接任何素材**即可运行——一句话创意直接换成成品提示词。`workflow/` 目录备了三份最小工作流（只有「LLM Loader → Prompt → 文本预览&保存」，不含 diffusion/CLIP/VAE），拖进 ComfyUI 或从侧边栏 *Trucy Prompt* 分组打开即可。
 *   **🚀 Skill Runner Trucy · Unload Model**：采样前释放本地 GGUF 显存；把「上游」通配输入接到提示词节点输出即可固定执行顺序。
 *   **采样微调**（Chat / Prompt / VLM Runner 三个执行节点都有，每项默认 = 「不指定、不发」，老工作流零行为变化）：`top_p` / `seed` 是 OpenAI 标准请求字段（本地 GGUF / LM Studio / 远程API 都按请求生效）；`top_k` / `重复惩罚` 是 llama.cpp 专有字段（本地 GGUF 与 LM Studio 生效，严格 OpenAI 兼容 API 没有这俩字段——被 400 拒绝时自动去掉重试，不打断流水线）；`保留思考过程` 仅本地 GGUF 思考型模型生效。详见第 8 节。
 *   **推理后自动卸载**（Chat / Prompt / VLM Runner 三个执行节点都有，默认关）：仅本地 GGUF 生效，本次推理完成后自动卸载模型释放显存（下次推理重新加载，略慢）。多个执行节点共用一个 LLM Loader 时建议只挂在最后一个上；也可以继续用专用的「卸载模型」节点。远程API / 局域网LM Studio 下无效（模型不在本机）。
@@ -124,7 +134,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 *   **推理后自动卸载**（默认关）：仅本地 GGUF 生效，推理完成后自动卸载模型释放显存（下次推理重新加载，略慢）；远程大脑下无效。
 *   **注意**：媒体能否真到模型取决于大脑——本地 GGUF 需选 mmproj 投影；DeepSeek API 现已支持图片（返回模型名为 `deepseek-flash`），视频模式走抽帧退化。
 
-### 8. H3 ref2v Trucy（MiniMax H3 参考生视频）
+### 9. H3 ref2v Trucy（MiniMax H3 参考生视频）
 官方 MiniMax H3 Ref2VA 管线的参考 conditioning，双形态任意选（参考编码数学逐位一致，单测对冲）：
 
 *   **🚀 H3 ref2v Trucy · 参考编码（缓存层）**：参考图/音频 + 双 VAE → AV latent + ref_data。**刻意没有 prompt 输入**——只改提示词时 ComfyUI 内置缓存直接跳过 VAE 重编码。
@@ -133,7 +143,26 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 两种形态都复用官方 helper（`_resize` / `_encode_ref_audio` / `_empty_av_latent`），遵循官方 `<Picture N>` / `<Audio N>` 标签规范（我们槽位 1 起编号 vs 官方 `ref_image_0` 0 起——端口名只是 kwargs 键，对结果零影响），全链路空值安全。视频参考端口已按决定摘除（确需时用官方 `MiniMaxH3ReferenceToVideo`，仍在册；收集后端休眠于 `trucy_media.py`）。
 
----
+### 10. MOSS-Image Prompt Enhancer（提示词节点第三家族，内置 Skill）
+
+MOSS 官方仓库 `OpenMOSS/MOSS-Image` 里的 `skills/moss-image-prompt-enhancer` 已原样内置到 `skills/`，对应提示词节点的预设 **`MOSS-Image（提示词增强）`**，任务下拉给两个：
+
+*   **MOSS·Caption**：一句粗糙创意 → 长描述散文（主体 / 动作 / 环境 / 镜头 / 光线 / 材质 / 色调），可直接喂任何生图模型，**不带任何字段包装**。
+*   **MOSS·Layout**：像素级版面控制（类似 Ideogram 那类「指定哪块放什么」的本事）——画布宽高取 16 的倍数 + 扁平 `items` 数组 + 绝对像素框，用于海报、多面板、精确文字排版。
+
+**输出契约（Layout）**：第一行 `尺寸：WxH`（这是给生图端的参数，**不进提示词正文**）→ 空一行 → `===== PROMPT =====` → 分隔行后**只放一行紧凑 JSON**，根字段仅允许 `summary` / `items` / `bbox_coord_space` / `bbox_format`（后两者固定为 `abs_centralized` / `yxyx`）。
+
+**坐标由模型自己算，不用你手算**：官方流程是「写 draft.json → 跑 compile_prompt.py」，但节点里没有 shell、也没有文件系统，所以把这套换算内化进了 Skill 与 `references/compile-rules.md`——`v1=floor(y1)−H//2`、`v2=floor(x1)−W//2`、`v3=ceil(y2)−H//2`、`v4=ceil(x2)−W//2`，输出顺序 `y1,x1,y2,x2`；**负值表示位于画面中心左上，属正常结果，严禁钳零**。
+
+**质量层（零打断，与 H3/QWI 同一套开关）**：
+*   忘做中心化——节点做**确定性补算**：若所有框都非负且都在画布内，判为「直接写了左上角像素」，自动减中心（幂等，重复运行不再动）；混用（已有负值）或越界时不猜、只报警。
+*   只记日志不打断的问题：画布宽高非 16 倍数、缺「尺寸：」行、缺 `===== PROMPT =====`、JSON 不可解析、根字段非法或缺失、`bbox_coord_space` / `bbox_format` 写错、框越界或顺序写反（xyxy）、Caption 模式误输出 JSON、8K / masterpiece 一类空话质量词。
+
+**怎么用**：
+*   **纯文本即可跑**：9 个参考图 + 3 个参考音频槽位全为 optional，一个槽都不接就行；`workflow/03_MOSS_caption_prompt.json` 是现成的最小图（只有 LLM Loader → Prompt → 文本预览&保存）。
+*   **采样**：Caption 温度 0.6~0.8 / max_tokens ≥2048；Layout 0.4~0.6 / ≥4096（Layout 是长 JSON，高温容易漏 `items` 或把 bbox 写歪，写歪了质量层会报）。
+*   **同家族 Skill 可替换**：`moss*` 前缀的自家 / 第三方 Skill 能直接挂进 MOSS 预设；H3 风格或 `qwen-image*` 家族的 Skill 会被忽略并回退内置（跨家族只在日志里说一声）。
+*   **MOSS 是纯文生图 Skill**，没有图片编辑任务。接了参考图节点仍会按素材清单一起发送，但官方 Skill 不定义编辑语义——要改图请走 `Qwen-Image-2.1 · Edit`。
 
 ## 🛠️ 安装与推送
 
@@ -221,6 +250,8 @@ Python 版本 `pip install` 即可。也支持源码编译（见 `requirements.t
 |---|---|---|---|
 | H3 视频提示词 | 0.3~0.5 | ≥ 4096 | 结构化输出要稳，低温防分镜乱跑 |
 | QWI 图像提示词 | 0.5~0.7 | ≥ 4096 | — |
+| MOSS Caption | 0.6~0.8 | ≥ 2048 | 长散文，需要展开细节 |
+| MOSS Layout | 0.4~0.6 | ≥ 4096 | JSON 字段多，高温易漏 items/bbox；坐标错了下面质量层会报 |
 | VLM 图片/视频描述 | 0.3~0.5 | 2048~4096 | 描述要准，别让模型发挥 |
 | Chat 创意对话 | 0.8~1.0 | 4096 | 越发散越有灵感，也越容易跑题 |
 
