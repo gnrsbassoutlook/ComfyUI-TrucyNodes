@@ -47,7 +47,8 @@ def _safe_import(module_name, class_names):
 
 # LLM / ref2v 节点族（合并自 ComfyUI-TrucyLLM，2026-10-16）
 #   trucy_skill_runner.py —— LLM Loader Trucy（三通道大脑装载，独立类目）；
-#                          Skill Runner Trucy 家族（Skill Loader / Chat / Prompt / Unload）；
+#                          Skill Runner Trucy 家族（Skill Loader / Chat / Prompt×2 / Unload）；
+#                          Prompt 分两态：Ref2V/I2I 带 12 个媒体槽、T2V/T2I 零媒体槽
 #                          VLM Runner Trucy（图片/视频推理，独立类目）
 #   trucy_ref2v.py        —— H3 ref2v Trucy：H3参考编码 / H3提示词编码 / H3参考转视频（合并版）
 #   trucy_dmad.py         —— H3 4 步加速采样器（DMAD 蒸馏 LoRA 专用推理步，替代 KSamplerSelect）
@@ -55,6 +56,7 @@ def _safe_import(module_name, class_names):
     "trucy_skill_runner",
     ["TrucyLLMLoader", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI", "TrucyUnloadModel"],
 )
+(TrucyPromptPure,) = _safe_import("trucy_skill_runner", ["TrucyPromptPure"])
 (TrucyVLMRunner,) = _safe_import("trucy_skill_runner", ["TrucyVLMRunner"])
 (TrucyH3RefEncode, TrucyH3PromptEncode, TrucyH3RefToVideo) = _safe_import(
     "trucy_ref2v",
@@ -115,6 +117,7 @@ optional_nodes = {
     "TrucySkillLoader": TrucySkillLoader,
     "TrucyChat": TrucyChat,
     "TrucyPromptH3QWI": TrucyPromptH3QWI,
+    "TrucyPromptPure": TrucyPromptPure,
     "TrucyUnloadModel": TrucyUnloadModel,
     # VLM Runner Trucy（图片/视频推理，不调用 Skill）
     "TrucyVLMRunner": TrucyVLMRunner,
@@ -176,7 +179,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Skill Runner Trucy 节点族（真正的 Skill 执行器）
     "TrucySkillLoader": "🚀 Skill Loader Trucy",
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
-    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI/MOSS)",
+    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (Ref2V/I2I)",
+    "TrucyPromptPure": "🚀 Skill Runner Trucy · Prompt (T2V/T2I)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
     # VLM Runner Trucy（图片/视频推理，独立类目）
     "TrucyVLMRunner": "🚀 VLM Runner Trucy",
@@ -234,9 +238,10 @@ except Exception as _e:  # 非 ComfyUI 环境（单测直 import）时静默跳�
 
 _LLM节点数 = sum(1 for k in NODE_CLASS_MAPPINGS
                  if k in ("TrucyLLMLoader", "TrucySkillLoader", "TrucyChat", "TrucyPromptH3QWI",
+                          "TrucyPromptPure",
                           "TrucyUnloadModel", "TrucyVLMRunner", "TrucyH3RefEncode",
                           "TrucyH3PromptEncode", "TrucyH3RefToVideo"))
 print("\033[36m[TrucyNodes]\033[0m "
       f"{len(NODE_CLASS_MAPPINGS)} nodes | LLM Loader Trucy + Skill Runner Trucy + VLM Runner Trucy"
       f" + H3 ref2v Trucy 已合并入本包"
-      f"（LLM 节点 {_LLM节点数}/9；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")
+      f"（LLM 节点 {_LLM节点数}/10；官方 MiniMax H3 参考转视频节点为视频参考备用通道）")

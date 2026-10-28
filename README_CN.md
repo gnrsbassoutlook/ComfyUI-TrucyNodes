@@ -10,8 +10,16 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ---
 
+### [2026-10-29] 提示词节点按「要不要吃素材」一分为二 + Skill Loader 可直接挑文件
+✂️ **一个节点拆成两个，各有各的下拉**——原来那个 `Prompt (H3/QWI)` 一个下拉塞了 10 项（三家族的六种输入形态混在一起），纯文生图时下面还挂着 9 个图槽 3 个音槽的空位。现在按输入形态分开：
+*   **`Prompt (T2V/T2I)`**：零媒体槽，任务下拉 `Auto / T2VA / T2I / Caption / Layout`。纯文生视频、纯文生图、MOSS 长描述与版面全在这儿。
+*   **`Prompt (Ref2V/I2I)`**：9 图 + 3 音槽位不变，任务下拉 `Auto / H3·I2VA / H3·FL2VA / H3·L2VA / H3·Ref2VA / QWI·Edit`。首帧、首尾帧、尾帧、全参考、图生图都在这儿。
+*   **老工作流不红框**：老节点类名 `TrucyPromptH3QWI`、端口顺序、执行逻辑一个字没改，只是显示名换成 `Prompt (Ref2V/I2I)`。历史图里存的老值（比如 `H3·T2VA`）直接跑仍然正常，只是下拉里选不到了——想改就换到新节点上。
+🧩 **Skill Loader 上多了个「选择 .md 文件」按钮**——原来那两个要你手动往里粘正文的输入框（加载文件名 / 加载文件内容）已藏起来，换成一个按钮：点开挑本地文件，`.md` / `.txt` 都认，**支持多选**（第一个优先取 `SKILL.md` 当正文，其余以 `===== 文件名 =====` 分块追加，等于"正文 + references"一次带进来）。选完自动切到「自动选择」，状态行写明加载了哪份、带几份附录；「清除」退回内置。纯前端读取，文件不出本机。
+🎯 **跨家族选错会明说**：新节点不带家族前缀，选了跟当前预设不匹配的任务（比如 QWI 预设下选 `T2VA`）会记一行「任务 X 不属于 Y 家族，改用 Auto」，而不是闷着跑。
+
 ### [2026-10-27] 提示词节点新增 MOSS-Image 家族：官方 Prompt Enhancer 预设
-🎨 **MOSS-Image（提示词增强）预设**——`🚀 Skill Runner Trucy · Prompt` 的技能预设从两家族扩到三家族，新增 MOSS 官方 `moss-image-prompt-enhancer`（内置 `skills/moss-image-prompt-enhancer/`）。任务下拉出现 **MOSS·Caption / MOSS·Layout**：
+🎨 **MOSS-Image（提示词增强）预设**——`🚀 Skill Runner Trucy · Prompt` 的技能预设从两家族扩到三家族，新增 MOSS 官方 `moss-image-prompt-enhancer`（内置 `skills/moss-image-prompt-enhancer/`）。任务下拉出现 **MOSS·Caption / MOSS·Layout**（现归 `Prompt (T2V/T2I)` 节点）：
 *   **Caption**：把一句创意扩写成长描述散文（主体/动作/环境/镜头/光线/材质/色调），可直接生图，不带任何字段包装。
 *   **Layout**：像素级版面控制（类似 Ideogram 那类"指定哪块放什么"的能力）——画布宽高 16 的倍数 + 扁平 `items` + 绝对像素 bbox，用于海报、多面板、精确文字排版。
 📐 **坐标由模型自己算，不用你手算**——官方 Skill 原本是"写 draft.json → 跑 compile_prompt.py"，节点里没有 shell，所以这套换算已内化进 Skill 与 references：`v1=floor(y1)−H//2`、`v2=floor(x1)−W//2`、`v3=ceil(y2)−H//2`、`v4=ceil(x2)−W//2`，输出顺序 `y,x,y,x`，负值表示位于中心左上（正常，禁止钳零）。Layout 输出第一行给 `尺寸：WxH`（生成参数，不进提示词），分隔行后只放一行紧凑 JSON。
@@ -49,7 +57,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ## 🚀 核心模块详述
 
-**共 51 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/LLM Loader`、`/Skill Runner`、`/VLM Runner`、`/ref2v`，外加 `sampling/custom_sampling/samplers`（下面的 DMAD 采样器）。
+**共 52 个节点。** ComfyUI 菜单分类：`TrucyNodes/Logic`、`/Image`、`/Toolkit`、`/Text`、`/Excel`、`/Audio`、`/Video`、`/LLM Loader`、`/Skill Runner`、`/VLM Runner`、`/ref2v`，外加 `sampling/custom_sampling/samplers`（下面的 DMAD 采样器）。
 
 ### 1. 逻辑与流程控制 (Logic 系列)
 *   **Trucy For Loop (Start / End, 9路 / 2路)**: 逻辑核心。
@@ -110,9 +118,12 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 *   **🚀 Skill Loader Trucy**：扫描内置 `skills/`（及 `comfyUI-llama-TE/skills`，存在时自动兼容）；可固定选一个，也可交给大脑自动匹配。
 *   **🚀 Skill Runner Trucy · Chat**：大脑 + Skill + 提示词 → 文本，带 **12 个参考素材槽位**（🖼️ 图1-9 / 🎵 音1-3）。空槽位跳过并记日志，绝不卡流水线。（旧版通用「图片」端口已删除——9 个编号图槽全覆盖，老工作流里连它的线需改一次。）
-*   **🚀 Skill Runner Trucy · Prompt (H3/QWI/MOSS)**：三套官方提示词 Skill 一个节点搞定——**H3**（MiniMax 视频提示词，`[Shot N]` 分镜 + 音效/配乐）、**Qwen-Image-2.1**（图像提示词重写）、**MOSS-Image**（官方 Prompt Enhancer：Caption 长描述 / Layout 像素版面，坐标由模型自行中心化编译）。质量层只检查记日志、**零打断**（可选一次自动纠正，默认关）。
+*   **🚀 Skill Runner Trucy · Prompt (T2V/T2I)**：**零媒体槽**的纯文本提示词节点——只有一个 LLM 口、一句话创意，任务下拉 `Auto / T2VA / T2I / Caption / Layout`。文生视频、文生图、MOSS 的 Caption 与 Layout 都在这儿。节点里没有 9 图 3 音那些空槽位，宽度只有带素材版的一半。
+*   **🚀 Skill Runner Trucy · Prompt (Ref2V/I2I)**：**带素材**的提示词节点——9 个参考图 + 3 个参考音频槽位，任务下拉 `Auto / H3·I2VA / H3·FL2VA / H3·L2VA / H3·Ref2VA / QWI·Edit`。首帧、首尾帧、尾帧、全参考、图生图都在这儿。
+    两个节点共用同一套执行链、同一套质量层、同一套采样微调控件，差别只是「这次要不要吃素材」。**老节点类名与端口一个没动**，所以历史工作流不会红框；把纯文本任务从老节点挪到新节点，只是下拉变短，不是能力变化。
 *   **🧩 第三方 Skill 可直接用**：把 GitHub 上拿到的 skill 目录整个丢进 `skills/`，刷新页面即出现在 `Skill Loader` 下拉，**不需要合并附录、不需要重启**。规则有三条：① 内置三家的 `references` 按任务精选加载，第三方则**全量自动兜底注入**（最多 6 份、单份 ≤24000 字符、合计 ≤48000 字符，超限跳过并记日志，绝不截断）；② 图像预设允许同家族 skill（`qwen-image*` / `moss*` 前缀），跨家族才回退内置；③ H3 预设不设限，任意 skill 都能挂。想临时试一份不落盘，用 Loader 的「加载文件内容」直接粘。
-    **纯文本同样能用**：9 个参考图 + 3 个参考音频槽位全部为 optional，`H3·T2VA` / `QWI·T2I` / `MOSS·Caption` 三类任务**不接任何素材**即可运行——一句话创意直接换成成品提示词。`workflow/` 目录备了三份最小工作流（只有「LLM Loader → Prompt → 文本预览&保存」，不含 diffusion/CLIP/VAE），拖进 ComfyUI 或从侧边栏 *Trucy Prompt* 分组打开即可。
+    **想试一份现成的？** `Skill Loader Trucy` 节点上有个 **「选择 .md 文件」按钮**（原来那两个塞正文的输入框已藏起来）——点一下就能从本地磁盘挑文件，`.md` / `.txt` 都认，**支持多选**：第一个（优先 `SKILL.md`）当正文，其余按 `===== 文件名 =====` 分块追加在后面，所以"SKILL.md + references/*.md"可以一次选进来。选完自动把下拉切到「自动选择」，状态行会写清加载了哪份、带几份附录；「清除」按钮退回内置 Skill。这条路只在本次会话生效，长期用还是放进 `skills/`。
+    **纯文本同样能用**：9 个参考图 + 3 个参考音频槽位全部为 optional，`H3·T2VA` / `QWI·T2I` / `MOSS·Caption` 三类任务**不接任何素材**即可运行——一句话创意直接换成成品提示词。`workflow/` 目录备了三份最小工作流（只有「LLM Loader → Prompt (T2V/T2I) → 文本预览&保存」，不含 diffusion/CLIP/VAE），拖进 ComfyUI 或从侧边栏 *Trucy Prompt* 分组打开即可。
 *   **🚀 Skill Runner Trucy · Unload Model**：采样前释放本地 GGUF 显存；把「上游」通配输入接到提示词节点输出即可固定执行顺序。
 *   **采样微调**（Chat / Prompt / VLM Runner 三个执行节点都有，每项默认 = 「不指定、不发」，老工作流零行为变化）：`top_p` / `seed` 是 OpenAI 标准请求字段（本地 GGUF / LM Studio / 远程API 都按请求生效）；`top_k` / `重复惩罚` 是 llama.cpp 专有字段（本地 GGUF 与 LM Studio 生效，严格 OpenAI 兼容 API 没有这俩字段——被 400 拒绝时自动去掉重试，不打断流水线）；`保留思考过程` 仅本地 GGUF 思考型模型生效。详见第 8 节。
 *   **推理后自动卸载**（Chat / Prompt / VLM Runner 三个执行节点都有，默认关）：仅本地 GGUF 生效，本次推理完成后自动卸载模型释放显存（下次推理重新加载，略慢）。多个执行节点共用一个 LLM Loader 时建议只挂在最后一个上；也可以继续用专用的「卸载模型」节点。远程API / 局域网LM Studio 下无效（模型不在本机）。
@@ -145,7 +156,7 @@ TrucyNodes 是一套为 AI 影视工作流量身定制的专业节点包。它�
 
 ### 10. MOSS-Image Prompt Enhancer（提示词节点第三家族，内置 Skill）
 
-MOSS 官方仓库 `OpenMOSS/MOSS-Image` 里的 `skills/moss-image-prompt-enhancer` 已原样内置到 `skills/`，对应提示词节点的预设 **`MOSS-Image（提示词增强）`**，任务下拉给两个：
+MOSS 官方仓库 `OpenMOSS/MOSS-Image` 里的 `skills/moss-image-prompt-enhancer` 已原样内置到 `skills/`，对应 **`Prompt (T2V/T2I)`** 节点（零媒体槽那个）的预设 **`MOSS-Image（提示词增强）`**，任务下拉给两个：
 
 *   **MOSS·Caption**：一句粗糙创意 → 长描述散文（主体 / 动作 / 环境 / 镜头 / 光线 / 材质 / 色调），可直接喂任何生图模型，**不带任何字段包装**。
 *   **MOSS·Layout**：像素级版面控制（类似 Ideogram 那类「指定哪块放什么」的本事）——画布宽高取 16 的倍数 + 扁平 `items` 数组 + 绝对像素框，用于海报、多面板、精确文字排版。

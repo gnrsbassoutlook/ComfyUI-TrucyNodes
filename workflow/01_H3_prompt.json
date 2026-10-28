@@ -54,14 +54,14 @@
     },
     {
       "id": 2,
-      "type": "TrucyPromptH3QWI",
+      "type": "TrucyPromptPure",
       "pos": [
         480,
         140
       ],
       "size": [
-        460,
-        900
+        420,
+        620
       ],
       "flags": {},
       "order": 1,
@@ -84,11 +84,11 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "TrucyPromptH3QWI"
+        "Node name for S&R": "TrucyPromptPure"
       },
       "widgets_values": [
         "H3（MiniMax 视频提示词）",
-        "H3·T2VA",
+        "T2VA",
         "雨夜的街角便利店门口，男主穿黑色连帽卫衣，点烟时火苗被风压得偏斜，他抬眼看了一下街对面，远处有救护车的红蓝光扫过积水的路面。",
         6.0,
         "English",

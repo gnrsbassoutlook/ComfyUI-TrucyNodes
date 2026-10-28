@@ -54,14 +54,14 @@
     },
     {
       "id": 2,
-      "type": "TrucyPromptH3QWI",
+      "type": "TrucyPromptPure",
       "pos": [
         480,
         140
       ],
       "size": [
-        460,
-        900
+        420,
+        620
       ],
       "flags": {},
       "order": 1,
@@ -84,11 +84,11 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "TrucyPromptH3QWI"
+        "Node name for S&R": "TrucyPromptPure"
       },
       "widgets_values": [
         "MOSS-Image（提示词增强）",
-        "MOSS·Caption",
+        "Caption",
         "咖啡馆靠窗的座位，午后阳光斜切进来，木桌上摊开一本翻到中间的书、一杯拉花拿铁，杯壁有水汽，窗外是模糊的行道树。",
         5.0,
         "English",

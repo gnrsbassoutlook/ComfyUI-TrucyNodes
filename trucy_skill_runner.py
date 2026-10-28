@@ -102,13 +102,19 @@ MOSS任务说明 = {
 第三方附录单文件上限 = 24000     # 单个附录超过此字符数则整份跳过（避免半截规则误导模型）
 第三方附录总量上限 = 48000       # 一次注入的全部附录合计字符上限
 技能预设选项 = ["H3（MiniMax 视频提示词）", "Qwen-Image-2.1（图像提示词）", "MOSS-Image（提示词增强）"]
-# 合并任务下拉：Auto 为三家族通用，其余带家族前缀，避免歧义
-合并任务选项 = (
+
+# 节点拆分（2026-10-29）：按「这次要不要吃素材」把提示词节点一分为二，
+# 各自的下拉只留本节点用得着的值，避免十几项混在一起。
+#   老节点 TrucyPromptH3QWI（Prompt · Ref2V/I2I）：12 个媒体槽在身，只管带素材的任务
+#   新节点 TrucyPromptPure （Prompt · T2V/T2I） ：零媒体槽，只管纯文本任务
+# 老节点的值保留家族前缀（历史工作流里存的就是这种写法，去掉会出现空白项）；
+# 新节点下拉不带前缀，节点内按当前预设补前缀后交给同一套执行逻辑。
+素材任务选项 = (
     ["Auto"]
-    + [f"H3·{t}" for t in H3任务选项 if t != "Auto"]
-    + [f"QWI·{t}" for t in QWI任务选项]
-    + [f"MOSS·{t}" for t in MOSS任务选项]
+    + [f"H3·{t}" for t in ("I2VA", "FL2VA", "L2VA", "Ref2VA")]
+    + ["QWI·Edit"]
 )
+纯文本任务选项 = ["Auto", "T2VA", "T2I", "Caption", "Layout"]
 
 # 质量模式（连续性优先：默认只检查并记录日志，零打断；纠正为可选）
 质量模式选项 = ["检查并记录（推荐）", "检查+自动纠正一次", "关闭检查"]
@@ -977,9 +983,10 @@ class TrucyPromptH3QWI:
     def INPUT_TYPES(cls):
         optional = {
             "skill加载器": ("TRUCY_SKILL", {
-                "tooltip": "H3 模式：默认使用内置 h3-prompt-writing Skill，接入后可换用 llama-TE 的风格 Skill"
-                           "（3D动画/品牌宣传/手绘实拍等）；Qwen-Image-2.1 模式：仅接受 qwen-image-2-1-prompter，"
-                           "其余 Skill 不适用会自动忽略。",
+                "tooltip": "不接：用内置的当前预设 Skill（H3 / Qwen-Image-2.1 / MOSS 三家官方规范）。\n"
+                           "接了：按家族前缀换书——H3 预设任意 Skill 都能挂；图像预设只认同家族"
+                           "（qwen-image* / moss*），跨家族会忽略并回退内置；"
+                           "第三方 / 自建 Skill 的 references 会自动全量注入。",
             }),
             "vision_context": ("STRING", {
                 "force_input": True, "default": "",
@@ -1062,10 +1069,13 @@ class TrucyPromptH3QWI:
                                "MOSS-Image = MOSS 官方 Prompt Enhancer（caption 长描述 / layout 像素排版，"
                                "坐标由模型自行中心化编译）。",
                 }),
-                "task_type": (合并任务选项, {
+                "task_type": (素材任务选项, {
                     "default": "Auto",
-                    "tooltip": "Auto 三家族通用；H3·* 仅 H3 预设用，QWI·* 仅 Qwen-Image-2.1 预设用，"
-                               "MOSS·Caption/Layout 仅 MOSS-Image 预设用（选错会自动纠正为 Auto）。",
+                    "tooltip": "带素材的任务：H3·I2VA 首帧 / FL2VA 首尾帧 / L2VA 尾帧 / Ref2VA 全参考、"
+                               "QWI·Edit 图生图。\n"
+                               "纯文本任务（T2VA 文生视频 / T2I 文生图 / MOSS 长描述与版面）在另一个节点"
+                               "「Prompt (T2V/T2I)」里，那个节点没有媒体槽、下拉也不参杂这些。\n"
+                               "选了与本预设不匹配的任务会自动纠正为 Auto 并记日志。",
                 }),
                 "scene_direction": ("STRING", {
                     "default": "", "multiline": True,
@@ -1486,6 +1496,65 @@ class TrucyPromptH3QWI:
 
 
 # ---------------------------------------------------------------------------
+# 节点 4b：Prompt (T2V/T2I) —— 纯文本形态
+# ---------------------------------------------------------------------------
+class TrucyPromptPure(TrucyPromptH3QWI):
+    """纯文本提示词节点：零媒体槽，只吃一句话创意。
+
+    与带素材的 TrucyPromptH3QWI 共用同一套执行逻辑，差别只在形态：
+      - 没有 9 个参考图 / 3 个参考音频槽位（节点宽度和控件数直接砍半）
+      - 任务下拉只留纯文本任务（T2VA / T2I / Caption / Layout），值不带家族前缀，
+        由节点按当前 skill_preset 补上前缀后交给父类；跨家族选择由父类自动纠正为 Auto
+
+    老节点的类名、端口顺序、任务选项一律不动，所以历史工作流不会红框。
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        完整 = super().INPUT_TYPES()
+        optional = {
+            名: 定义 for 名, 定义 in 完整.get("optional", {}).items()
+            if not (名.startswith("🖼️") or 名.startswith("🎵"))
+        }
+        required = dict(完整["required"])
+        required["task_type"] = (纯文本任务选项, {
+            "default": "Auto",
+            "tooltip": "纯文本任务：T2VA 文生视频 / T2I 文生图 / Caption 长描述 / Layout 像素版面。\n"
+                       "Auto 交给 Skill 自己判断——本节点没有素材槽，H3 自然落到 T2VA、"
+                       "Qwen 落到 T2I、MOSS 落到 Caption。\n"
+                       "选了跟当前预设不匹配的任务会自动纠正为 Auto 并记日志。",
+        })
+        return {"required": required, "optional": optional}
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "run"
+    CATEGORY = "TrucyNodes/Skill Runner"
+
+    def run(self, LLM, skill_preset, task_type, scene_direction, duration, output_language,
+            temperature, max_tokens, **kwargs):
+        预设 = str(skill_preset or "")
+        家族 = "QWI" if 预设.startswith("Qwen") else ("MOSS" if 预设.startswith("MOSS") else "H3")
+        任务 = str(task_type or "Auto")
+        if 任务 != "Auto":
+            # 无前缀的值 = 用户按「任务」而不是「家族」在选，先确认这任务归当前家族，
+            # 不归就明说并退回 Auto（不能靠父类的前缀纠正——那层看到的已经是带前缀的值，
+            # 会误判成同家族，然后静默改 Auto，用户不知道为什么）
+            家族任务 = {"H3": {"T2VA"}, "QWI": {"T2I"}, "MOSS": {"Caption", "Layout"}}[家族]
+            纯任务 = 任务.split("·")[-1]
+            if 纯任务 not in 家族任务:
+                _日志(f"提示词节点: 任务 {任务} 不属于 {家族} 家族（{预设}），改用 Auto")
+                任务 = "Auto"
+            elif "·" not in 任务:
+                # 补前缀后复用父类同一套执行逻辑；已带前缀（从老图抄过来）不再套一层
+                任务 = f"{家族}·{任务}"
+        return super().run(
+            LLM, skill_preset, 任务, scene_direction, duration, output_language,
+            temperature, max_tokens, **kwargs,
+        )
+
+
+# ---------------------------------------------------------------------------
 # 注册
 # ---------------------------------------------------------------------------
 
@@ -1494,6 +1563,7 @@ NODE_CLASS_MAPPINGS = {
     "TrucySkillLoader": TrucySkillLoader,
     "TrucyChat": TrucyChat,
     "TrucyPromptH3QWI": TrucyPromptH3QWI,
+    "TrucyPromptPure": TrucyPromptPure,
     "TrucyUnloadModel": TrucyUnloadModel,
     "TrucyVLMRunner": TrucyVLMRunner,
 }
@@ -1502,7 +1572,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "TrucyLLMLoader": "🚀 LLM Loader Trucy",
     "TrucySkillLoader": "🚀 Skill Loader Trucy",
     "TrucyChat": "🚀 Skill Runner Trucy · Chat",
-    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (H3/QWI)",
+    "TrucyPromptH3QWI": "🚀 Skill Runner Trucy · Prompt (Ref2V/I2I)",
+    "TrucyPromptPure": "🚀 Skill Runner Trucy · Prompt (T2V/T2I)",
     "TrucyUnloadModel": "🚀 Skill Runner Trucy · Unload Model",
     "TrucyVLMRunner": "🚀 VLM Runner Trucy",
 }
